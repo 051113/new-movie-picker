@@ -1,6 +1,7 @@
 import streamlit as st
 
-st.title("Name Caller")
+st.set_page_config(page_title="3 movie picks")
+st.title("3 movie picks")
 
 if "saved_name" not in st.session_state:
     st.session_state.saved_name = ""
