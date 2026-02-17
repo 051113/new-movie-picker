@@ -8,12 +8,30 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from services.openai_client import OpenAIService
-from services.recs import (
-    get_sectioned_recommendations,
-    load_collections,
-    pick_featured_collection,
-    rank_collections_for_user,
-)
+from services.recs import load_collections, pick_featured_collection, rank_collections_for_user
+try:
+    from services.recs import get_sectioned_recommendations
+except ImportError:
+    from services.recs import get_ranked_recommendations as _legacy_ranked
+
+    def get_sectioned_recommendations(*args, **kwargs):
+        recs, profile_text, profile_hash = _legacy_ranked(*args, **kwargs)
+        top = recs[:4]
+        short = recs[4:6]
+        because = recs[6:9]
+        wild = recs[9:12]
+        return {
+            "sections": {
+                "top_matches": top,
+                "short": short,
+                "because_you_liked": because,
+                "wildcards": wild,
+            },
+            "profile_text": profile_text,
+            "profile_hash": profile_hash,
+            "context_hash": profile_hash,
+            "ranking_version": "legacy",
+        }
 from services.storage import Storage
 from services.tmdb import TMDBClient, TMDBError
 
