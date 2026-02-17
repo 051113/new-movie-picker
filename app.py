@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 
 from services.openai_client import OpenAIService
 from services.recs import load_collections, pick_featured_collection, rank_collections_for_user
+
 try:
     from services.recs import get_sectioned_recommendations
 except ImportError:
@@ -16,28 +17,95 @@ except ImportError:
 
     def get_sectioned_recommendations(*args, **kwargs):
         recs, profile_text, profile_hash = _legacy_ranked(*args, **kwargs)
-        top = recs[:4]
-        short = recs[4:6]
-        because = recs[6:9]
-        wild = recs[9:12]
         return {
             "sections": {
-                "top_matches": top,
-                "short": short,
-                "because_you_liked": because,
-                "wildcards": wild,
+                "top_matches": recs[:4],
+                "short": recs[4:6],
+                "because_you_liked": recs[6:9],
+                "wildcards": recs[9:12],
             },
             "profile_text": profile_text,
             "profile_hash": profile_hash,
             "context_hash": profile_hash,
             "ranking_version": "legacy",
         }
+
 from services.storage import Storage
 from services.tmdb import TMDBClient, TMDBError
 
 
 load_dotenv()
 st.set_page_config(page_title="VibeRecs", layout="wide")
+
+
+def inject_styles() -> None:
+    st.markdown(
+        """
+        <style>
+        .block-container {
+            max-width: 1120px;
+            padding-top: 1.4rem;
+            padding-bottom: 2rem;
+        }
+        .vr-section-title {
+            font-size: 1.22rem;
+            font-weight: 700;
+            margin: 1.0rem 0 0.45rem 0;
+            letter-spacing: 0.01em;
+        }
+        .vr-soft-card {
+            background: #ffffff;
+            border: 1px solid #e8edf3;
+            border-radius: 12px;
+            box-shadow: 0 4px 14px rgba(18, 38, 63, 0.05);
+            padding: 0.75rem 0.9rem;
+            margin-bottom: 0.75rem;
+        }
+        .vr-session-line {
+            color: #425466;
+            font-size: 0.92rem;
+            margin-bottom: 0.4rem;
+        }
+        .vr-chip {
+            display: inline-block;
+            padding: 0.2rem 0.55rem;
+            border-radius: 999px;
+            border: 1px solid #dce6f2;
+            background: #f6f9fc;
+            color: #334e68;
+            font-size: 0.75rem;
+            margin: 0.12rem 0.18rem 0.12rem 0;
+        }
+        .vr-meta {
+            color: #5d7085;
+            font-size: 0.88rem;
+            margin-top: -0.1rem;
+            margin-bottom: 0.25rem;
+        }
+        .vr-muted {
+            color: #6b7f95;
+            font-size: 0.78rem;
+        }
+        .vr-why-item {
+            margin-bottom: 0.2rem;
+            font-size: 0.9rem;
+            color: #2d3e50;
+        }
+        .vr-divider {
+            margin: 0.4rem 0 0.6rem 0;
+        }
+        .stButton button {
+            border-radius: 10px;
+        }
+        .stButton button[kind="secondary"] {
+            border-color: #d9e3ef;
+            color: #334e68;
+            background: #f8fbff;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def env_or_secret(name: str, default: Optional[str] = None) -> Optional[str]:
@@ -125,8 +193,8 @@ def init_state(storage: Storage) -> None:
 
 
 def save_profile(storage: Storage) -> None:
-    exploration = 0.5
     hidden = st.session_state.vibe_dials.get("mainstream_hidden", "Balanced")
+    exploration = 0.5
     if hidden == "Mainstream":
         exploration = 0.2
     elif hidden == "Hidden Gems":
@@ -161,7 +229,7 @@ def ensure_onboarding_movies(tmdb: TMDBClient) -> None:
 
 
 def render_onboarding(tmdb: TMDBClient, storage: Storage) -> None:
-    st.subheader("Onboarding")
+    st.markdown('<div class="vr-section-title">Onboarding</div>', unsafe_allow_html=True)
     st.caption("Swipe 10 movies to bootstrap your taste profile.")
     ensure_onboarding_movies(tmdb)
     swipe_count = len(st.session_state.swipes)
@@ -200,9 +268,7 @@ def render_onboarding(tmdb: TMDBClient, storage: Storage) -> None:
     st.success("Onboarding complete. Set tonight's context.")
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.session_state.context["mood"] = st.selectbox(
-            "Mood", ["chill", "high-energy", "emotional", "spooky", "thoughtful", "romantic"], index=0
-        )
+        st.session_state.context["mood"] = st.selectbox("Mood", ["chill", "high-energy", "emotional", "spooky", "thoughtful", "romantic"], index=0)
     with c2:
         st.session_state.context["who"] = st.selectbox("Who", ["solo", "date", "friends", "family"], index=0)
     with c3:
@@ -233,12 +299,7 @@ def _constraint_picker(current: Dict[str, bool]) -> Dict[str, bool]:
     picked = dict(current)
     if hasattr(st, "pills"):
         defaults = [labels[k] for k, v in current.items() if v]
-        selected = st.pills(
-            "Constraints",
-            list(labels.values()),
-            selection_mode="multi",
-            default=defaults,
-        )
+        selected = st.pills("Constraints", list(labels.values()), selection_mode="multi", default=defaults)
         selected = selected or []
         inv = {v: k for k, v in labels.items()}
         picked = {k: False for k in labels}
@@ -254,67 +315,49 @@ def _constraint_picker(current: Dict[str, bool]) -> Dict[str, bool]:
 
 
 def render_context_and_controls(storage: Storage) -> None:
-    st.markdown("### Tonight's context")
+    st.markdown('<div class="vr-section-title">Tonight\'s context</div>', unsafe_allow_html=True)
+    ctx = st.session_state.context
+    summary = f"{ctx.get('who', 'solo').title()} • {ctx.get('mood', 'chill').title()} • {ctx.get('time', '90-120m')}"
+    st.markdown(f'<div class="vr-soft-card"><div class="vr-session-line">Session mode: {summary}</div></div>', unsafe_allow_html=True)
     b1, b2, b3 = st.columns(3)
     with b1:
-        st.session_state.context["mood"] = _pick_one(
-            "Mood",
-            ["chill", "high-energy", "emotional", "spooky", "thoughtful", "romantic"],
-            st.session_state.context.get("mood", "chill"),
-            "ctx_mood",
-        )
+        st.session_state.context["mood"] = _pick_one("Mood", ["chill", "high-energy", "emotional", "spooky", "thoughtful", "romantic"], st.session_state.context.get("mood", "chill"), "ctx_mood")
     with b2:
-        st.session_state.context["who"] = _pick_one(
-            "Who",
-            ["solo", "date", "friends", "family"],
-            st.session_state.context.get("who", "solo"),
-            "ctx_who",
-        )
+        st.session_state.context["who"] = _pick_one("Who", ["solo", "date", "friends", "family"], st.session_state.context.get("who", "solo"), "ctx_who")
     with b3:
-        st.session_state.context["time"] = _pick_one(
-            "Time",
-            ["<90m", "90-120m", "120m+"],
-            st.session_state.context.get("time", "90-120m"),
-            "ctx_time",
-        )
+        st.session_state.context["time"] = _pick_one("Time", ["<90m", "90-120m", "120m+"], st.session_state.context.get("time", "90-120m"), "ctx_time")
 
-    st.markdown("### Tonight's Vibe")
+    st.markdown('<div class="vr-section-title">Tonight\'s Vibe</div>', unsafe_allow_html=True)
+    st.markdown('<div class="vr-soft-card"><div class="vr-session-line">Set the overall tone before fine tuning.</div></div>', unsafe_allow_html=True)
     d1, d2, d3 = st.columns(3)
     with d1:
-        st.session_state.vibe_dials["cozy_intense"] = _pick_one(
-            "Cozy ↔ Intense",
-            ["Cozy", "Balanced", "Intense"],
-            st.session_state.vibe_dials.get("cozy_intense", "Balanced"),
-            "dial_cozy",
-        )
+        st.session_state.vibe_dials["cozy_intense"] = _pick_one("Cozy <-> Intense", ["Cozy", "Balanced", "Intense"], st.session_state.vibe_dials.get("cozy_intense", "Balanced"), "dial_cozy")
     with d2:
-        st.session_state.vibe_dials["light_dark"] = _pick_one(
-            "Light ↔ Dark",
-            ["Light", "Balanced", "Dark"],
-            st.session_state.vibe_dials.get("light_dark", "Balanced"),
-            "dial_light",
-        )
+        st.session_state.vibe_dials["light_dark"] = _pick_one("Light <-> Dark", ["Light", "Balanced", "Dark"], st.session_state.vibe_dials.get("light_dark", "Balanced"), "dial_light")
     with d3:
-        st.session_state.vibe_dials["mainstream_hidden"] = _pick_one(
-            "Mainstream ↔ Hidden Gems",
-            ["Mainstream", "Balanced", "Hidden Gems"],
-            st.session_state.vibe_dials.get("mainstream_hidden", "Balanced"),
-            "dial_hidden",
-        )
+        st.session_state.vibe_dials["mainstream_hidden"] = _pick_one("Mainstream <-> Hidden Gems", ["Mainstream", "Balanced", "Hidden Gems"], st.session_state.vibe_dials.get("mainstream_hidden", "Balanced"), "dial_hidden")
 
     with st.expander("Fine tune", expanded=False):
-        for slider_name in ["pace", "darkness", "humor", "romance", "violence", "weirdness"]:
-            value = st.slider(
-                slider_name.capitalize(),
-                min_value=0,
-                max_value=100,
-                value=int(st.session_state.sliders.get(slider_name, 50)),
-                key=f"sld_{slider_name}",
-            )
-            st.session_state.sliders[slider_name] = value
-            st.caption(semantic_label(slider_name, value))
+        st.caption("Use these for precise control after setting your vibe dials.")
+        slider_cols = st.columns(2)
+        names = ["pace", "darkness", "humor", "romance", "violence", "weirdness"]
+        for i, slider_name in enumerate(names):
+            with slider_cols[i % 2]:
+                value = st.slider(
+                    slider_name.capitalize(),
+                    min_value=0,
+                    max_value=100,
+                    value=int(st.session_state.sliders.get(slider_name, 50)),
+                    key=f"sld_{slider_name}",
+                )
+                st.session_state.sliders[slider_name] = value
+                st.caption(semantic_label(slider_name, value))
 
     st.session_state.constraints = _constraint_picker(st.session_state.constraints)
+    selected_constraints = [k.replace("_", " ") for k, v in st.session_state.constraints.items() if v]
+    if selected_constraints:
+        chips = "".join([f'<span class="vr-chip">{c}</span>' for c in selected_constraints])
+        st.markdown(chips, unsafe_allow_html=True)
     save_profile(storage)
 
 
@@ -377,21 +420,21 @@ def log_shown_cards(storage: Storage, sections: Dict[str, List[Dict[str, Any]]])
 
 
 def apply_reason_adjustment(reason: str) -> None:
-    if reason == "Too dark":
+    if reason == "too_dark":
         st.session_state.sliders["darkness"] = max(0, st.session_state.sliders["darkness"] - 10)
-    elif reason == "Too slow":
+    elif reason == "too_slow":
         st.session_state.sliders["pace"] = min(100, st.session_state.sliders["pace"] + 10)
-    elif reason == "Too violent":
+    elif reason == "too_violent":
         st.session_state.sliders["violence"] = max(0, st.session_state.sliders["violence"] - 12)
         st.session_state.constraints["less_violent"] = True
-    elif reason == "Not in the mood":
+    elif reason == "not_in_mood":
         st.session_state.context["mood"] = "chill"
 
 
 def render_why(movie: Dict[str, Any], openai_service: OpenAIService, storage: Storage) -> None:
     deterministic = movie.get("_reasons", []) or ["Fits your current vibe settings", "Strong overall match score"]
     for item in deterministic:
-        st.markdown(f"- {item}")
+        st.markdown(f'<div class="vr-why-item">[x] {item}</div>', unsafe_allow_html=True)
 
     storage.log_interaction(
         st.session_state.user_id,
@@ -402,7 +445,7 @@ def render_why(movie: Dict[str, Any], openai_service: OpenAIService, storage: St
     )
 
     if openai_service.enabled:
-        if st.button("Add AI angle", key=f"why_ai_{movie['id']}"):
+        if st.button("Add AI angle", key=f"why_ai_{movie['id']}", type="secondary", use_container_width=True):
             extras = openai_service.generate_why_spoiler_free(
                 movie=movie,
                 deterministic_bullets=deterministic,
@@ -415,91 +458,131 @@ def render_why(movie: Dict[str, Any], openai_service: OpenAIService, storage: St
                 context_hash=st.session_state.context_hash,
             )
             for line in extras:
-                st.markdown(f"- {line}")
+                st.markdown(f'<div class="vr-why-item">[x] {line}</div>', unsafe_allow_html=True)
+
+
+def _metadata_line(movie: Dict[str, Any], tmdb: TMDBClient) -> str:
+    parts: List[str] = []
+    rating = movie.get("vote_average")
+    if rating:
+        parts.append(f"* {float(rating):.1f}")
+
+    runtime = movie.get("runtime")
+    if runtime:
+        parts.append(f"{int(runtime)}m")
+    elif runtime is None:
+        parts.append("Runtime not available")
+
+    providers = movie.get("providers", {}) or {}
+    flat = providers.get("flatrate", [])
+    if flat:
+        name = flat[0].get("provider_name")
+        if name:
+            parts.append(name)
+    elif not providers:
+        parts.append("Availability unknown")
+
+    popularity = movie.get("popularity") or 0
+    if popularity and popularity > 0:
+        parts.append(f"Pop {int(popularity)}")
+
+    return " • ".join(parts)
 
 
 def render_movie_card(movie: Dict[str, Any], tmdb: TMDBClient, openai_service: OpenAIService, storage: Storage) -> None:
+    movie_id = int(movie["id"])
     year = (movie.get("release_date") or "")[:4]
-    poster = TMDBClient.image_url(movie.get("poster_path"))
+    poster = TMDBClient.image_url(movie.get("poster_path"), size="w342")
     if poster:
         st.image(poster, use_container_width=True)
     st.markdown(f"**{movie.get('title', '-')} ({year or '-'})**")
-
-    rating = movie.get("vote_average", "-")
-    popularity = int(movie.get("popularity", 0))
-    runtime_label = tmdb.runtime_label(movie.get("runtime"))
-    st.caption(f"⭐ {rating} | Popularity {popularity} | {runtime_label}")
+    st.markdown(f'<div class="vr-meta">{_metadata_line(movie, tmdb)}</div>', unsafe_allow_html=True)
 
     badges = tmdb.provider_badges(movie.get("providers", {}))
     if badges:
-        st.write(" | ".join([f"`{b}`" for b in badges[:4]]))
+        chips = "".join([f'<span class="vr-chip">{b}</span>' for b in badges[:4]])
+        st.markdown(chips, unsafe_allow_html=True)
     else:
-        st.write("`No provider listed`")
+        st.markdown('<span class="vr-chip">Availability unknown</span>', unsafe_allow_html=True)
+
     age_days = movie.get("provider_age_days")
     if age_days is None:
-        st.caption("Availability checked: unknown")
+        st.markdown('<div class="vr-muted">Availability checked: unknown</div>', unsafe_allow_html=True)
     else:
-        st.caption(f"Availability checked: {age_days} days ago")
+        st.markdown(f'<div class="vr-muted">Availability checked: {age_days} days ago</div>', unsafe_allow_html=True)
 
-    b1, b2, b3 = st.columns(3)
-    with b1:
-        if st.button("👍 More like this", key=f"like_{movie['id']}", use_container_width=True):
-            st.session_state.seed_movie_id = int(movie["id"])
+    like_col, skip_col = st.columns(2)
+    with like_col:
+        if st.button("Like", key=f"like_{movie_id}", use_container_width=True):
+            st.session_state.seed_movie_id = movie_id
             storage.log_interaction(
                 st.session_state.user_id,
-                movie_id=int(movie["id"]),
+                movie_id=movie_id,
                 action="like",
                 session_id=st.session_state.session_id,
                 ranking_version=st.session_state.ranking_version,
             )
             st.session_state.last_signature = ""
             st.rerun()
-    with b2:
-        if st.button("👎 Not for me", key=f"dislike_{movie['id']}", use_container_width=True):
+    with skip_col:
+        if st.button("Skip", key=f"skip_{movie_id}", use_container_width=True):
             storage.log_interaction(
                 st.session_state.user_id,
-                movie_id=int(movie["id"]),
+                movie_id=movie_id,
                 action="dislike",
                 session_id=st.session_state.session_id,
                 ranking_version=st.session_state.ranking_version,
             )
+            st.session_state[f"show_reason_{movie_id}"] = True
             st.session_state.last_signature = ""
             st.rerun()
-    with b3:
-        if st.button("👀 Seen it", key=f"seen_{movie['id']}", use_container_width=True):
+
+    sec1, sec2 = st.columns(2)
+    with sec1:
+        if st.button("Seen it", key=f"seen_{movie_id}", use_container_width=True, type="secondary"):
             storage.log_interaction(
                 st.session_state.user_id,
-                movie_id=int(movie["id"]),
+                movie_id=movie_id,
                 action="seen",
                 session_id=st.session_state.session_id,
                 ranking_version=st.session_state.ranking_version,
             )
             st.session_state.last_signature = ""
             st.rerun()
+    with sec2:
+        with st.expander("Why this?"):
+            render_why(movie, openai_service, storage)
 
-    reason_cols = st.columns(2)
-    reasons = ["Too dark", "Too slow", "Too violent", "Not in the mood"]
-    for i, reason in enumerate(reasons):
-        with reason_cols[i % 2]:
-            if st.button(reason, key=f"reason_{movie['id']}_{reason}", use_container_width=True):
-                apply_reason_adjustment(reason)
-                storage.log_interaction(
-                    st.session_state.user_id,
-                    movie_id=int(movie["id"]),
-                    action="dislike",
-                    reason=reason,
-                    session_id=st.session_state.session_id,
-                    ranking_version=st.session_state.ranking_version,
-                )
-                save_profile(storage)
-                st.session_state.last_signature = ""
-                st.rerun()
+    if st.session_state.get(f"show_reason_{movie_id}", False):
+        with st.expander("Tell us why", expanded=True):
+            reasons = [
+                ("Too dark", "too_dark"),
+                ("Too slow", "too_slow"),
+                ("Too violent", "too_violent"),
+                ("Not in the mood", "not_in_mood"),
+            ]
+            reason_cols = st.columns(2)
+            for i, (label, code) in enumerate(reasons):
+                with reason_cols[i % 2]:
+                    if st.button(label, key=f"reason_{movie_id}_{code}", use_container_width=True, type="secondary"):
+                        apply_reason_adjustment(code)
+                        storage.log_interaction(
+                            st.session_state.user_id,
+                            movie_id=movie_id,
+                            action="dislike",
+                            reason=code,
+                            session_id=st.session_state.session_id,
+                            ranking_version=st.session_state.ranking_version,
+                        )
+                        save_profile(storage)
+                        st.session_state.last_signature = ""
+                        st.rerun()
 
-    with st.expander("Why this?"):
-        render_why(movie, openai_service, storage)
+    st.markdown('<div class="vr-divider"></div>', unsafe_allow_html=True)
 
 
 def render_sections(tmdb: TMDBClient, openai_service: OpenAIService, storage: Storage) -> None:
+    st.markdown('<div class="vr-section-title">Recommendations</div>', unsafe_allow_html=True)
     sections = st.session_state.sections or {}
     log_shown_cards(storage, sections)
 
@@ -510,16 +593,17 @@ def render_sections(tmdb: TMDBClient, openai_service: OpenAIService, storage: St
         ("Wildcard picks", "wildcards"),
     ]
     for title, key in labels:
-        st.markdown(f"### {title}")
+        st.markdown(f"#### {title}")
         rows = sections.get(key, [])
-        cols = st.columns(4 if key == "top_matches" else 3)
+        cols = st.columns(3)
         for idx, movie in enumerate(rows):
-            with cols[idx % len(cols)]:
-                render_movie_card(movie, tmdb, openai_service, storage)
+            with cols[idx % 3]:
+                with st.container(border=True):
+                    render_movie_card(movie, tmdb, openai_service, storage)
 
 
 def render_collections_sidebar(openai_service: OpenAIService, storage: Storage, region: str) -> None:
-    st.sidebar.subheader("Collections")
+    st.sidebar.markdown("### Collections")
     collections = load_collections("curated_collections.json", region=region)
     profile_text = (
         f"context={st.session_state.context}, vibe={st.session_state.vibe_dials}, "
@@ -527,47 +611,46 @@ def render_collections_sidebar(openai_service: OpenAIService, storage: Storage, 
     )
     ranked = rank_collections_for_user(collections, profile_text, openai_service, storage)
     featured = pick_featured_collection(ranked)
-    st.sidebar.markdown(f"**Featured:** {featured['title']}")
+    st.sidebar.markdown(f"**Featured**")
+    st.sidebar.write(featured["title"])
     st.sidebar.caption(featured.get("description", ""))
-    st.sidebar.divider()
+    st.sidebar.markdown("---")
     shown = [c for c in ranked if c["id"] != featured["id"]][:4]
     if len(shown) < 3:
         shown = (shown + collections)[:3]
     for col in shown[:4]:
-        st.sidebar.write(f"- {col['title']}")
+        st.sidebar.markdown(f"- {col['title']}")
 
 
 def render_sidebar(storage: Storage) -> None:
-    st.sidebar.subheader("Settings")
+    st.sidebar.markdown("### Settings")
     region_options = ["US", "KR", "GB", "CA", "AU", "DE", "FR", "JP", "IN"]
     if st.session_state.region not in region_options:
         region_options = [st.session_state.region] + region_options
-    st.session_state.region = st.sidebar.selectbox(
-        "Region",
-        region_options,
-        index=region_options.index(st.session_state.region),
-    )
+    st.session_state.region = st.sidebar.selectbox("Region", region_options, index=region_options.index(st.session_state.region))
 
-    st.sidebar.markdown("**Reset taste**")
-    if st.sidebar.button("Soft reset (last 20 interactions)"):
+    st.sidebar.markdown("### Reset taste")
+    if st.sidebar.button("Soft reset (last 20 interactions)", type="secondary", use_container_width=True):
         storage.reset_profile_soft(st.session_state.user_id, n=20)
         st.session_state.last_signature = ""
         st.rerun()
-    if st.sidebar.button("Full reset (wipe profile + interactions)"):
+    if st.sidebar.button("Full reset (wipe profile + interactions)", type="secondary", use_container_width=True):
         storage.reset_profile_full(st.session_state.user_id)
-        old_uid = str(uuid.uuid4())
+        next_uid = str(uuid.uuid4())
         for key in list(st.session_state.keys()):
             del st.session_state[key]
-        st.session_state.user_id = old_uid
+        st.session_state.user_id = next_uid
         st.rerun()
 
     metrics = storage.get_metrics(st.session_state.user_id)
-    st.sidebar.caption(
-        f"Like rate: {metrics['like_rate']:.2f} | Skip rate: {metrics['skip_rate']:.2f} | Why opens: {metrics['why_open_count']}"
-    )
+    with st.sidebar.expander("Advanced metrics", expanded=False):
+        st.caption(f"Like rate: {metrics['like_rate']:.2f}")
+        st.caption(f"Skip rate: {metrics['skip_rate']:.2f}")
+        st.caption(f"Why opens: {metrics['why_open_count']}")
 
 
 def main() -> None:
+    inject_styles()
     st.title("VibeRecs")
     tmdb_api_key = env_or_secret("TMDB_API_KEY")
     openai_api_key = env_or_secret("OPENAI_API_KEY")
@@ -592,7 +675,7 @@ def main() -> None:
             return
 
         render_context_and_controls(storage)
-        if st.button("Update to this vibe", type="primary"):
+        if st.button("Update to this vibe", type="primary", use_container_width=False):
             rerank_if_needed(tmdb, openai_service, storage, force=True)
         else:
             rerank_if_needed(tmdb, openai_service, storage, force=False)
