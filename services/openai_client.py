@@ -15,79 +15,82 @@ class OpenAIService:
     def enabled(self) -> bool:
         return self.client is not None
 
-    def embed_text(self, cache_key: str, text_version: str, text: str) -> Optional[List[float]]:
+    def _pseudo_movie_id(self, cache_namespace: str) -> int:
+        # Negative IDs keep non-movie vectors in the same cache table.
+        return -int(cache_namespace[:7], 16)
+
+    def embed_text(self, cache_movie_id: int, text: str) -> Optional[List[float]]:
         if not self.client:
             return None
-
-        cached = self.storage.get_embedding_cache(cache_key, text_version)
+        text_hash = self.storage.stable_hash(text)
+        cached = self.storage.embeddings_cache_get(cache_movie_id, text_hash)
         if cached is not None:
             return cached
 
-        response = self.client.embeddings.create(
-            model="text-embedding-3-small",
-            input=text,
-        )
-        embedding = response.data[0].embedding
-        self.storage.set_embedding_cache(cache_key, text_version, embedding)
-        return embedding
+        resp = self.client.embeddings.create(model="text-embedding-3-small", input=text)
+        vector = resp.data[0].embedding
+        self.storage.embeddings_cache_set(cache_movie_id, text_hash, vector)
+        return vector
 
-    def embed_user_profile(self, user_profile_hash: str, user_profile_text: str) -> Optional[List[float]]:
-        key = f"user:{user_profile_hash}"
-        return self.embed_text(cache_key=key, text_version=user_profile_hash, text=user_profile_text)
+    def embed_movie_text(self, movie_id: int, movie_text: str) -> Optional[List[float]]:
+        return self.embed_text(movie_id, movie_text)
 
-    def embed_movie_text(self, movie_id: int, text_version: str, movie_text: str) -> Optional[List[float]]:
-        key = f"movie:{movie_id}:{text_version}"
-        return self.embed_text(cache_key=key, text_version=text_version, text=movie_text)
+    def embed_user_profile(self, profile_text: str) -> Optional[List[float]]:
+        pseudo_id = self._pseudo_movie_id(self.storage.stable_hash(f"user:{profile_text}"))
+        return self.embed_text(pseudo_id, profile_text)
 
-    def explain_recommendation(
+    def embed_collection(self, collection_id: str, text: str) -> Optional[List[float]]:
+        pseudo_id = self._pseudo_movie_id(self.storage.stable_hash(f"col:{collection_id}"))
+        return self.embed_text(pseudo_id, text)
+
+    def generate_why_spoiler_free(
         self,
-        user_id: str,
-        user_profile_hash: str,
-        movie_id: int,
-        controls_hash: str,
-        prompt_context: Dict[str, Any],
-    ) -> str:
-        cached = self.storage.get_explanation_cache(user_profile_hash, movie_id, controls_hash)
+        movie: Dict[str, Any],
+        deterministic_bullets: List[str],
+        user_context: Dict[str, Any],
+        profile_hash: str,
+        context_hash: str,
+    ) -> List[str]:
+        movie_id = int(movie.get("id", 0))
+        cached = self.storage.why_cache_get(movie_id, profile_hash, context_hash)
         if cached:
-            return cached
+            return [line.strip("- ").strip() for line in cached.splitlines() if line.strip()]
 
         if not self.client:
-            fallback = "- Matches your current preferences\n- Similar mood and tone to your recent likes"
-            self.storage.set_explanation_cache(
-                user_id=user_id,
-                user_profile_hash=user_profile_hash,
-                movie_id=movie_id,
-                controls_hash=controls_hash,
-                explanation_text=fallback,
-            )
-            return fallback
+            return []
 
+        payload = {
+            "movie": {
+                "title": movie.get("title"),
+                "overview": movie.get("overview", ""),
+                "genres": movie.get("genres", []),
+                "runtime": movie.get("runtime"),
+            },
+            "context": user_context,
+            "deterministic_bullets": deterministic_bullets,
+            "task": "Add 1-2 extra spoiler-free bullets. No plot reveals, twists, deaths, endings.",
+        }
         instructions = (
-            "You are a movie recommendation assistant. Return only 2-4 bullet points. "
-            "Spoiler-free. Tie reasons to user intent and movie attributes (tone, pacing, themes)."
+            "Return exactly 1-2 concise bullet points. Keep them spoiler-free. "
+            "Do not mention specific plot events."
         )
+        try:
+            resp = self.client.responses.create(
+                model="gpt-4o-mini",
+                input=[
+                    {"role": "system", "content": instructions},
+                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+                ],
+                max_output_tokens=120,
+                temperature=0.2,
+            )
+            raw = (resp.output_text or "").strip()
+            lines = [line.strip("- ").strip() for line in raw.splitlines() if line.strip()]
+            lines = lines[:2]
+        except Exception:
+            lines = []
 
-        content = json.dumps(prompt_context, ensure_ascii=False)
-        response = self.client.responses.create(
-            model="gpt-4o-mini",
-            input=[
-                {"role": "system", "content": instructions},
-                {"role": "user", "content": content},
-            ],
-            temperature=0.3,
-            max_output_tokens=150,
-        )
-
-        text = (response.output_text or "").strip()
-        if not text:
-            text = "- Good fit for your current vibe\n- Aligns with your selected pacing and tone"
-
-        self.storage.set_explanation_cache(
-            user_id=user_id,
-            user_profile_hash=user_profile_hash,
-            movie_id=movie_id,
-            controls_hash=controls_hash,
-            explanation_text=text,
-        )
-        return text
-
+        if lines:
+            serialized = "\n".join(f"- {line}" for line in lines)
+            self.storage.why_cache_set(movie_id, profile_hash, context_hash, serialized)
+        return lines
