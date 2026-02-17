@@ -1,0 +1,70 @@
+﻿[
+  {
+    "id": "rainy_day_comfort",
+    "title": "Rainy-day comfort",
+    "description": "Warm, reassuring picks for low-energy nights.",
+    "embedding_text": "comforting cozy hopeful heartfelt warm low-stress",
+    "query": {
+      "with_genres": "35,18,10749",
+      "with_runtime.lte": 120,
+      "sort_by": "vote_average.desc",
+      "vote_count.gte": 200
+    }
+  },
+  {
+    "id": "smart_thrillers",
+    "title": "Smart thrillers",
+    "description": "Tense but cerebral films with strong mystery hooks.",
+    "embedding_text": "smart thriller cerebral mystery suspense twists",
+    "query": {
+      "with_genres": "53,9648",
+      "sort_by": "popularity.desc",
+      "vote_count.gte": 300
+    }
+  },
+  {
+    "id": "underrated_scifi",
+    "title": "Underrated sci-fi",
+    "description": "Speculative stories that deserve more attention.",
+    "embedding_text": "underrated science fiction speculative thoughtful",
+    "query": {
+      "with_genres": "878",
+      "vote_average.gte": 6.5,
+      "vote_count.gte": 150
+    }
+  },
+  {
+    "id": "ninety_minute_bangers",
+    "title": "90-minute bangers",
+    "description": "High-impact movies that stay short.",
+    "embedding_text": "fast paced concise high energy 90 minute",
+    "query": {
+      "with_runtime.lte": 95,
+      "sort_by": "popularity.desc",
+      "vote_count.gte": 200
+    }
+  },
+  {
+    "id": "romantic_detours",
+    "title": "Romantic detours",
+    "description": "Romance-forward picks with emotional payoff.",
+    "embedding_text": "romance emotional heartfelt partner date night",
+    "query": {
+      "with_genres": "10749,18",
+      "sort_by": "vote_average.desc",
+      "vote_count.gte": 150
+    }
+  },
+  {
+    "id": "playful_family_night",
+    "title": "Playful family night",
+    "description": "Accessible picks for mixed-age groups.",
+    "embedding_text": "family friendly funny animated playful kids",
+    "query": {
+      "with_genres": "16,10751,35",
+      "with_runtime.lte": 115,
+      "vote_count.gte": 120
+    }
+  }
+]
+
