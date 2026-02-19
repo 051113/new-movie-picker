@@ -677,3 +677,256 @@ def get_sectioned_recommendations(
         "context_hash": context_hash,
         "ranking_version": ranking_version,
     }
+
+
+def _quick_profile_components(context: Dict[str, Any], constraints: Dict[str, Any], refinement: Optional[str]) -> Tuple[Dict[str, str], Dict[str, int]]:
+    intention = context.get("intention", "Engaging Story")
+    energy = context.get("energy", "Balanced")
+
+    vibe_dials = {
+        "cozy_intense": "Intense" if energy == "High" else ("Cozy" if energy == "Chill" else "Balanced"),
+        "light_dark": "Dark" if intention in {"Intense & Thrilling", "Emotional & Deep"} else "Light",
+        "mainstream_hidden": "Hidden Gems" if intention == "Surprise Me" else "Balanced",
+    }
+    sliders = {"pace": 55, "darkness": 45, "humor": 45, "romance": 35, "violence": 35, "weirdness": 30}
+
+    if intention == "Comfort & Cozy":
+        sliders.update({"humor": 60, "darkness": 25, "pace": 40})
+    elif intention == "Light & Fun":
+        sliders.update({"humor": 80, "darkness": 20, "pace": 60})
+    elif intention == "Engaging Story":
+        sliders.update({"pace": 55, "darkness": 45})
+    elif intention == "Intense & Thrilling":
+        sliders.update({"pace": 80, "darkness": 70, "violence": 60})
+    elif intention == "Emotional & Deep":
+        sliders.update({"darkness": 65, "romance": 55, "pace": 45})
+    elif intention == "Surprise Me":
+        sliders.update({"weirdness": 75, "pace": 55})
+
+    if refinement == "More exciting":
+        sliders["pace"] = min(100, sliders["pace"] + 15)
+    elif refinement == "Funnier":
+        sliders["humor"] = min(100, sliders["humor"] + 20)
+    elif refinement == "More emotional":
+        sliders["romance"] = min(100, sliders["romance"] + 20)
+    elif refinement == "Lighter":
+        sliders["darkness"] = max(0, sliders["darkness"] - 20)
+    elif refinement == "Darker":
+        sliders["darkness"] = min(100, sliders["darkness"] + 20)
+    elif refinement == "Shorter":
+        constraints["shorter"] = True
+    elif refinement == "More popular":
+        vibe_dials["mainstream_hidden"] = "Mainstream"
+    elif refinement == "More indie":
+        vibe_dials["mainstream_hidden"] = "Hidden Gems"
+    elif refinement == "Surprise me":
+        sliders["weirdness"] = min(100, sliders["weirdness"] + 15)
+
+    return vibe_dials, sliders
+
+
+def _runtime_bucket_from_minutes(minutes: Optional[int]) -> str:
+    if minutes is None:
+        return "120m+"
+    if minutes <= 30:
+        return "<90m"
+    if minutes <= 100:
+        return "90-120m"
+    return "120m+"
+
+
+def _clip_overview(text: str, length: int = 180) -> str:
+    text = (text or "").strip()
+    if len(text) <= length:
+        return text
+    return text[: length - 1].rstrip() + "…"
+
+
+def get_quick_pick(
+    user_id: str,
+    context: Dict[str, Any],
+    constraints: Dict[str, Any],
+    refinement: Optional[str] = None,
+    *,
+    tmdb: TMDBClient,
+    openai_service: OpenAIService,
+    storage: Storage,
+) -> Dict[str, Any]:
+    region = (constraints.get("region") or context.get("region") or "KR").upper()
+    time_minutes = context.get("time_minutes")
+    provider_allow = set(constraints.get("provider_names") or [])
+
+    quick_constraints = {
+        "only_streaming_now": bool(constraints.get("streaming_only")),
+        "shorter": bool(constraints.get("streaming_only") and (time_minutes is not None and time_minutes <= 45)),
+        "non_english_ok": True,
+        "less_violent": False,
+        "more_hopeful": False,
+        "no_jump_scares": False,
+    }
+    quick_context = {
+        "mood": context.get("intention", "Engaging Story"),
+        "who": context.get("who", "Alone"),
+        "time": _runtime_bucket_from_minutes(time_minutes),
+    }
+    vibe_dials, sliders = _quick_profile_components(quick_context, quick_constraints, refinement)
+
+    interactions = storage.get_interactions(user_id, limit=1200)
+    recent_like_ids = storage.get_recent_likes(user_id, limit=5)
+    recent_seen_ids = set(storage.get_recent_seen(user_id, limit=400))
+    collections = _build_fallback_collections(region)
+
+    candidate_map = _candidate_generation(tmdb, recent_like_ids=recent_like_ids, region=region, collections=collections)
+    candidate_map = dict(list(candidate_map.items())[:420])
+    enriched = _fetch_details_and_providers(tmdb, candidate_map, region, recent_like_ids)
+
+    filtered: List[Dict[str, Any]] = []
+    wildcard_filtered: List[Dict[str, Any]] = []
+    wildcard_constraints = dict(quick_constraints)
+    wildcard_constraints["only_streaming_now"] = False
+
+    for movie in enriched:
+        if movie["id"] in recent_seen_ids:
+            continue
+
+        runtime = movie.get("runtime")
+        if time_minutes is not None and runtime and runtime > (time_minutes + 10):
+            continue
+
+        if provider_allow and quick_constraints["only_streaming_now"]:
+            flat_names = {p.get("provider_name") for p in (movie.get("providers", {}).get("flatrate", []) or [])}
+            if not (flat_names & provider_allow):
+                continue
+
+        ok, reasons, penalty = _hard_filter(movie, context=quick_context, constraints=quick_constraints, region=region)
+        if ok:
+            item = dict(movie)
+            item["_hard_reasons"] = reasons
+            item["_hard_penalty"] = penalty
+            filtered.append(item)
+
+        ok_wild, reasons_w, penalty_w = _hard_filter(movie, context=quick_context, constraints=wildcard_constraints, region=region)
+        if ok_wild:
+            item_w = dict(movie)
+            item_w["_hard_reasons"] = reasons_w
+            item_w["_hard_penalty"] = penalty_w
+            wildcard_filtered.append(item_w)
+
+    if not filtered:
+        # Last fallback to popular list in region.
+        for m in tmdb.popular_movies(page=1, region=region):
+            try:
+                bundle = tmdb.get_movie_bundle(m["id"], region=region)
+                m = {**m, "runtime": bundle["runtime"], "providers": bundle["providers"], "provider_age_days": bundle["provider_age_days"], "genres": bundle["details"].get("genres", []), "keywords": bundle["details"].get("keywords", {}).get("keywords", [])}
+                filtered.append(m)
+                wildcard_filtered.append(dict(m))
+                if len(filtered) >= 15:
+                    break
+            except Exception:
+                continue
+
+    profile_text = _profile_text(
+        context=quick_context,
+        vibe_dials=vibe_dials,
+        sliders=sliders,
+        constraints=quick_constraints,
+        recent_like_titles=[],
+        recent_dislike_titles=[],
+        seed_title="",
+    )
+    profile_hash = storage.stable_hash(profile_text)
+    context_hash = storage.stable_hash(json.dumps({"context": context, "constraints": constraints, "refinement": refinement}, sort_keys=True))
+
+    ranked = _score_movies(
+        movies=filtered,
+        profile_text=profile_text,
+        vibe_dials=vibe_dials,
+        sliders=sliders,
+        constraints=quick_constraints,
+        interactions=interactions,
+        openai_service=openai_service,
+    )
+    ranked = _apply_diversity(ranked)
+
+    ranked_wild = _score_movies(
+        movies=wildcard_filtered,
+        profile_text=profile_text,
+        vibe_dials=vibe_dials,
+        sliders=sliders,
+        constraints=wildcard_constraints,
+        interactions=interactions,
+        openai_service=openai_service,
+    )
+    ranked_wild = _apply_diversity(ranked_wild)
+
+    top = ranked[0] if ranked else None
+    backup = None
+    wildcard = None
+
+    if top:
+        top_genres = _genre_ids(top)
+        for m in ranked[1:]:
+            if _genre_ids(m) & top_genres:
+                backup = m
+                break
+        if backup is None and len(ranked) > 1:
+            backup = ranked[1]
+
+        top_year = (top.get("release_date") or "0000")[:4]
+        for m in ranked_wild:
+            if m["id"] == top["id"] or (backup and m["id"] == backup["id"]):
+                continue
+            different_genre = len(_genre_ids(m) & top_genres) == 0
+            different_era = (m.get("release_date") or "0000")[:4] != top_year
+            if different_genre or different_era:
+                wildcard = m
+                break
+        if wildcard is None:
+            for m in ranked_wild:
+                if m["id"] != top["id"] and (not backup or m["id"] != backup["id"]):
+                    wildcard = m
+                    break
+
+    # Guarantee exactly three outputs.
+    picks = [p for p in [top, backup, wildcard] if p]
+    if len(picks) < 3:
+        for m in ranked:
+            if m not in picks:
+                picks.append(m)
+            if len(picks) >= 3:
+                break
+    while len(picks) < 3:
+        picks.append(None)
+
+    top, backup, wildcard = picks[0], picks[1], picks[2]
+
+    reasons: Dict[str, List[str]] = {}
+    for name, movie in [("top", top), ("backup", backup), ("wildcard", wildcard)]:
+        if not movie:
+            reasons[name] = ["No matching title found for this slot."]
+            continue
+        bullet = _reasons_for_movie(movie, context=quick_context, constraints=quick_constraints if name != "wildcard" else wildcard_constraints)
+        if movie.get("runtime") and time_minutes is not None and movie["runtime"] <= (time_minutes + 10):
+            bullet.append("Fits your available time.")
+        if movie.get("providers", {}).get("flatrate"):
+            bullet.append("Available on streaming in your region.")
+        if refinement:
+            bullet.append(f"Adjusted for refinement: {refinement}.")
+        reasons[name] = bullet[:3]
+
+    def _shape(movie: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not movie:
+            return None
+        return {
+            **movie,
+            "overview": _clip_overview(movie.get("overview", ""), 180),
+        }
+
+    return {
+        "top": _shape(top),
+        "backup": _shape(backup),
+        "wildcard": _shape(wildcard),
+        "reasons": reasons,
+        "profile_hash": profile_hash,
+        "context_hash": context_hash,
+    }

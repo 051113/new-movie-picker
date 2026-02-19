@@ -94,6 +94,13 @@ class TMDBClient:
             "runtime": details.get("runtime"),
         }
 
+    def region_streaming_providers(self, region: Optional[str] = None) -> List[str]:
+        reg = (region or self.region).upper()
+        data = self._get("/watch/providers/movie", {"watch_region": reg})
+        rows = data.get("results", [])
+        names = [r.get("provider_name", "") for r in rows if r.get("provider_name")]
+        return sorted(set(names))
+
     @staticmethod
     def image_url(path: Optional[str], size: str = "w342") -> str:
         if not path:
