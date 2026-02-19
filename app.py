@@ -1,4 +1,5 @@
 import json
+import io
 import os
 import time
 import uuid
@@ -6,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 import streamlit as st
 from dotenv import load_dotenv
+from PIL import Image, ImageDraw
 
 from services.openai_client import OpenAIService
 from services.recs import load_collections, pick_featured_collection, rank_collections_for_user
@@ -216,6 +218,18 @@ def inject_styles() -> None:
         """,
         unsafe_allow_html=True,
     )
+
+
+@st.cache_data
+def placeholder_poster_bytes(width: int = 342, height: int = 513) -> bytes:
+    image = Image.new("RGB", (width, height), color=(236, 240, 246))
+    draw = ImageDraw.Draw(image)
+    text = "No Image\nFound"
+    # Keep rendering simple and dependency-free with default font.
+    draw.multiline_text((width // 2, height // 2), text, fill=(110, 124, 145), anchor="mm", align="center")
+    buff = io.BytesIO()
+    image.save(buff, format="PNG")
+    return buff.getvalue()
 
 
 def env_or_secret(name: str, default: Optional[str] = None) -> Optional[str]:
@@ -483,6 +497,8 @@ def render_movie_card(movie: Dict[str, Any], tmdb: TMDBClient, openai_service: O
     poster = TMDBClient.image_url(movie.get("poster_path"), size="w342")
     if poster:
         st.image(poster, use_container_width=True)
+    else:
+        st.image(placeholder_poster_bytes(), use_container_width=True)
     st.markdown(f"**{movie.get('title', '-')} ({year or '-'})**")
     st.markdown(f'<div class="vr-meta">{_metadata_line(movie)}</div>', unsafe_allow_html=True)
 
