@@ -8,7 +8,71 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from services.openai_client import OpenAIService
-from services.recs import get_quick_pick
+try:
+    from services.recs import get_quick_pick
+except ImportError:
+    # Backward-compatible fallback for environments that don't have get_quick_pick yet.
+    from services.recs import get_sectioned_recommendations as _legacy_sectioned
+
+    def get_quick_pick(
+        user_id: str,
+        context: Dict[str, Any],
+        constraints: Dict[str, Any],
+        refinement: Optional[str] = None,
+        *,
+        tmdb: Any,
+        openai_service: Any,
+        storage: Any,
+    ) -> Dict[str, Any]:
+        time_minutes = context.get("time_minutes", 90)
+        if time_minutes <= 30:
+            time_bucket = "<90m"
+        elif time_minutes <= 100:
+            time_bucket = "90-120m"
+        else:
+            time_bucket = "120m+"
+
+        legacy_context = {
+            "mood": "thoughtful",
+            "who": str(context.get("who", "Alone")).lower(),
+            "time": time_bucket,
+        }
+        vibe_dials = {"cozy_intense": "Balanced", "light_dark": "Balanced", "mainstream_hidden": "Balanced"}
+        sliders = {"pace": 55, "darkness": 45, "humor": 45, "romance": 35, "violence": 35, "weirdness": 30}
+        legacy_constraints = {
+            "less_violent": False,
+            "more_hopeful": False,
+            "shorter": bool(refinement == "Shorter"),
+            "non_english_ok": True,
+            "no_jump_scares": False,
+            "only_streaming_now": bool(constraints.get("streaming_only")),
+        }
+        region = (constraints.get("region") or context.get("region") or "KR").upper()
+        sections_payload = _legacy_sectioned(
+            tmdb=tmdb,
+            openai_service=openai_service,
+            storage=storage,
+            user_id=user_id,
+            context=legacy_context,
+            vibe_dials=vibe_dials,
+            sliders=sliders,
+            constraints=legacy_constraints,
+            region=region,
+            collections=[],
+            seed_movie_id=None,
+            ranking_version="quick_pick_fallback",
+        )
+        top = (sections_payload.get("sections", {}).get("top_matches") or [None])[0]
+        backup = (sections_payload.get("sections", {}).get("because_you_liked") or [None])[0]
+        wildcard = (sections_payload.get("sections", {}).get("wildcards") or [None])[0]
+        return {
+            "top": top,
+            "backup": backup,
+            "wildcard": wildcard,
+            "reasons": {"top": [], "backup": [], "wildcard": []},
+            "profile_hash": sections_payload.get("profile_hash", ""),
+            "context_hash": sections_payload.get("context_hash", ""),
+        }
 from services.storage import Storage
 from services.tmdb import TMDBClient, TMDBError
 
