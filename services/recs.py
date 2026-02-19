@@ -461,6 +461,7 @@ def _ensure_minimum_mix(selected: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 def _build_sections(
     ranked: List[Dict[str, Any]],
     recent_like_ids: List[int],
+    wildcard_source: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, List[Dict[str, Any]]]:
     used = set()
 
@@ -475,35 +476,36 @@ def _build_sections(
                 break
         return out
 
-    top = take(ranked, 4)
-    short = take([m for m in ranked if (m.get("runtime") or 999) <= 100], 2)
+    top = take(ranked, 18)
+    short = take([m for m in ranked if (m.get("runtime") or 999) <= 100], 12)
     because = take(
         [m for m in ranked if set(m.get("_matched_seed_ids", [])) & set(recent_like_ids[:3])],
-        3,
+        12,
     )
+    wild_pool = wildcard_source if wildcard_source is not None else ranked
     wild = take(
         sorted(
-            ranked,
+            wild_pool,
             key=lambda x: ((x.get("popularity") or 0), -(x.get("_score_diverse") or 0)),
         ),
-        3,
+        12,
     )
 
     # Fill deficits from ranked list.
-    while len(top) < 4:
+    while len(top) < 18:
         top += take(ranked, 1)
-    while len(short) < 2:
+    while len(short) < 12:
         short += take(ranked, 1)
-    while len(because) < 3:
+    while len(because) < 12:
         because += take(ranked, 1)
-    while len(wild) < 3:
+    while len(wild) < 12:
         wild += take(ranked, 1)
 
     return {
-        "top_matches": top[:4],
-        "short": short[:2],
-        "because_you_liked": because[:3],
-        "wildcards": wild[:3],
+        "top_matches": top[:18],
+        "short": short[:12],
+        "because_you_liked": because[:12],
+        "wildcards": wild[:12],
     }
 
 
@@ -609,20 +611,35 @@ def get_sectioned_recommendations(
     candidate_map = dict(list(candidate_map.items())[:360])
     enriched = _fetch_details_and_providers(tmdb, candidate_map, region, recent_like_ids)
 
-    # Hard filters before ranking.
-    filtered = []
+    # Hard filters before ranking (main path respects all constraints, including only_streaming_now).
+    filtered_main = []
+    filtered_wild = []
+    wildcard_constraints = dict(constraints)
+    wildcard_constraints["only_streaming_now"] = False
+
     for movie in enriched:
         if movie["id"] in recent_seen_ids:
             continue
         ok, reasons, penalty = _hard_filter(movie, context=context, constraints=constraints, region=region)
         if not ok:
+            # Wildcards ignore only_streaming_now, but keep other hard constraints.
+            ok_wild, reasons_wild, penalty_wild = _hard_filter(
+                movie, context=context, constraints=wildcard_constraints, region=region
+            )
+            if not ok_wild:
+                continue
+            wild_copy = dict(movie)
+            wild_copy["_hard_reasons"] = reasons_wild
+            wild_copy["_hard_penalty"] = penalty_wild
+            filtered_wild.append(wild_copy)
             continue
         movie["_hard_reasons"] = reasons
         movie["_hard_penalty"] = penalty
-        filtered.append(movie)
+        filtered_main.append(movie)
+        filtered_wild.append(dict(movie))
 
     ranked = _score_movies(
-        movies=filtered,
+        movies=filtered_main,
         profile_text=profile_text,
         vibe_dials=vibe_dials,
         sliders=sliders,
@@ -633,11 +650,26 @@ def get_sectioned_recommendations(
     ranked = _apply_diversity(ranked)
     ranked = _ensure_minimum_mix(ranked)
 
+    ranked_wild = _score_movies(
+        movies=filtered_wild,
+        profile_text=profile_text,
+        vibe_dials=vibe_dials,
+        sliders=sliders,
+        constraints=wildcard_constraints,
+        interactions=interactions,
+        openai_service=openai_service,
+    )
+    ranked_wild = _apply_diversity(ranked_wild)
+
     for movie in ranked:
         movie["_reasons"] = _reasons_for_movie(movie, context=context, constraints=constraints)
         movie["_ranking_version"] = ranking_version
 
-    sections = _build_sections(ranked, recent_like_ids=recent_like_ids)
+    for movie in ranked_wild:
+        movie["_reasons"] = _reasons_for_movie(movie, context=context, constraints=wildcard_constraints)
+        movie["_ranking_version"] = ranking_version
+
+    sections = _build_sections(ranked, recent_like_ids=recent_like_ids, wildcard_source=ranked_wild)
     return {
         "sections": sections,
         "profile_text": profile_text,
