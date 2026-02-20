@@ -124,6 +124,11 @@ TRANSLATIONS = {
         "user_id_help": "Use your own ID to keep a separate recommendation profile.",
         "active_user": "Active user",
         "switch_user": "Switch user",
+        "log_in": "Log in",
+        "log_out": "Log out",
+        "login_required": "Set your user ID and log in to use recommendations.",
+        "feedback_applied_like": "Feedback saved. We'll prioritize similar picks.",
+        "feedback_applied_dislike": "Feedback saved. We'll avoid similar picks.",
         "language": "Language",
         "language_english": "English",
         "language_korean": "Korean",
@@ -330,6 +335,10 @@ def init_state(storage: Storage) -> None:
         st.session_state.profile_loaded_for_user = None
     if "user_id_input" not in st.session_state:
         st.session_state.user_id_input = st.session_state.user_id
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = False
+    if "feedback_notice" not in st.session_state:
+        st.session_state.feedback_notice = None
     storage.get_or_create_user(st.session_state.user_id, region=env_or_secret("TMDB_REGION", "KR") or "KR")
 
 
@@ -341,10 +350,11 @@ def soft_reset(storage: Storage) -> None:
 
 def full_reset(storage: Storage) -> None:
     storage.reset_profile_full(st.session_state.user_id)
-    uid = str(uuid.uuid4())
     for key in list(st.session_state.keys()):
         del st.session_state[key]
-        st.session_state.user_id = uid
+    st.session_state.user_id = "guest"
+    st.session_state.user_id_input = ""
+    st.session_state.logged_in = False
 
 
 def pick_single(label: str, options: List[str], default: str, key: str) -> str:
@@ -560,10 +570,14 @@ def action_buttons(
     with cols[0]:
         if st.button(t("like"), key=f"like_{slot_key}_{movie['id']}", use_container_width=True):
             storage.log_interaction(st.session_state.user_id, int(movie["id"]), "like", session_id=st.session_state.qp_session_id, ranking_version="quick_pick")
+            st.session_state.feedback_notice = t("feedback_applied_like")
+            st.rerun()
     with cols[1]:
         if st.button(t("dislike"), key=f"dislike_{slot_key}_{movie['id']}", use_container_width=True):
             storage.log_interaction(st.session_state.user_id, int(movie["id"]), "dislike", session_id=st.session_state.qp_session_id, ranking_version="quick_pick")
             st.session_state.skip_reason_slot = (slot_key, int(movie["id"]))
+            st.session_state.feedback_notice = t("feedback_applied_dislike")
+            st.rerun()
     with cols[2]:
         if st.button(t("renew"), key=f"renew_{slot_key}_{movie['id']}", use_container_width=True):
             storage.log_interaction(st.session_state.user_id, int(movie["id"]), "seen", session_id=st.session_state.qp_session_id, ranking_version="quick_pick")
@@ -678,11 +692,6 @@ def main() -> None:
     st.title("VibeRecs")
     storage = Storage()
     init_state(storage)
-    if st.session_state.profile_loaded_for_user != st.session_state.user_id:
-        load_user_profile_into_state(storage, st.session_state.user_id)
-        st.session_state.profile_loaded_for_user = st.session_state.user_id
-    if st.session_state.get("user_id_input") != st.session_state.user_id:
-        st.session_state.user_id_input = st.session_state.user_id
 
     st.sidebar.markdown(f"### {t('settings')}")
     st.sidebar.text_input(
@@ -690,16 +699,38 @@ def main() -> None:
         key="user_id_input",
         help=t("user_id_help"),
     )
-    if st.sidebar.button(t("switch_user"), type="secondary", use_container_width=True):
-        chosen_user = normalize_user_id(st.session_state.get("user_id_input", ""))
-        if chosen_user != st.session_state.user_id:
-            st.session_state.user_id = chosen_user
-            st.session_state.qp_session_id = str(uuid.uuid4())
-            storage.get_or_create_user(chosen_user, region=st.session_state.get("qp_region", "KR"))
-            load_user_profile_into_state(storage, chosen_user)
-            st.session_state.profile_loaded_for_user = chosen_user
+
+    raw_user_input = (st.session_state.get("user_id_input") or "").strip()
+    if not st.session_state.logged_in:
+        if st.sidebar.button(t("log_in"), type="primary", use_container_width=True):
+            if not raw_user_input:
+                st.sidebar.warning(t("login_required"))
+            else:
+                chosen_user = normalize_user_id(raw_user_input)
+                st.session_state.user_id = chosen_user
+                st.session_state.qp_session_id = str(uuid.uuid4())
+                st.session_state.logged_in = True
+                storage.get_or_create_user(chosen_user, region=st.session_state.get("qp_region", "KR"))
+                load_user_profile_into_state(storage, chosen_user)
+                st.session_state.profile_loaded_for_user = chosen_user
+                st.rerun()
+    else:
+        if st.sidebar.button(t("switch_user"), type="secondary", use_container_width=True):
+            if raw_user_input:
+                chosen_user = normalize_user_id(raw_user_input)
+                if chosen_user != st.session_state.user_id:
+                    st.session_state.user_id = chosen_user
+                    st.session_state.qp_session_id = str(uuid.uuid4())
+                    storage.get_or_create_user(chosen_user, region=st.session_state.get("qp_region", "KR"))
+                    load_user_profile_into_state(storage, chosen_user)
+                    st.session_state.profile_loaded_for_user = chosen_user
+                    st.rerun()
+        if st.sidebar.button(t("log_out"), type="secondary", use_container_width=True):
+            st.session_state.logged_in = False
+            st.session_state.qp_results = None
+            st.session_state.profile_loaded_for_user = None
             st.rerun()
-    st.sidebar.caption(f"{t('active_user')}: `{st.session_state.user_id}`")
+        st.sidebar.caption(f"{t('active_user')}: `{st.session_state.user_id}`")
 
     language_labels = {"en": t("language_english"), "ko": t("language_korean")}
     options = [language_labels["en"], language_labels["ko"]]
@@ -711,6 +742,17 @@ def main() -> None:
     if st.sidebar.button(t("full_reset"), type="secondary", use_container_width=True):
         full_reset(storage)
         st.rerun()
+
+    if not st.session_state.logged_in:
+        st.info(t("login_required"))
+        st.stop()
+
+    if st.session_state.profile_loaded_for_user != st.session_state.user_id:
+        load_user_profile_into_state(storage, st.session_state.user_id)
+        st.session_state.profile_loaded_for_user = st.session_state.user_id
+    if st.session_state.get("feedback_notice"):
+        st.success(str(st.session_state.feedback_notice))
+        st.session_state.feedback_notice = None
 
     tmdb_api_key = env_or_secret("TMDB_API_KEY")
     openai_api_key = env_or_secret("OPENAI_API_KEY")

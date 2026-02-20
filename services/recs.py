@@ -335,7 +335,11 @@ def _score_movies(
     recent_shown = [i["movie_id"] for i in interactions if i["action"] == "shown"][:50]
     recent_shown_set = set(recent_shown)
 
+    like_ids = [i["movie_id"] for i in interactions if i["action"] == "like"][:30]
     dislike_ids = [i["movie_id"] for i in interactions if i["action"] == "dislike"][:20]
+    liked_set = set(like_ids)
+    disliked_set = set(dislike_ids)
+    like_vectors = []
     dislike_vectors = []
     user_vector = openai_service.embed_user_profile(profile_text)
 
@@ -351,6 +355,21 @@ def _score_movies(
             mvec = openai_service.embed_movie_text(int(m["id"]), text)
             m["_embedding"] = mvec
         m["_sim_embed"] = cosine_similarity(user_vector, mvec)
+
+    if user_vector and like_ids:
+        for lid in like_ids:
+            for m in movies:
+                if m["id"] == lid:
+                    if m.get("_embedding"):
+                        like_vectors.append(m["_embedding"])
+                    break
+        if like_vectors:
+            dim_l = len(like_vectors[0])
+            like_centroid = [sum(v[i] for v in like_vectors) / len(like_vectors) for i in range(dim_l)]
+        else:
+            like_centroid = None
+    else:
+        like_centroid = None
 
     if user_vector and dislike_ids:
         for did in dislike_ids:
@@ -377,17 +396,27 @@ def _score_movies(
         novelty = 1.0 if m["id"] not in recent_shown_set else 0.2
         if m["id"] in seen_ids:
             novelty *= 0.05
+        if m["id"] in disliked_set:
+            novelty *= 0.01
 
         score = 0.42 * embed_sim + 0.26 * slider_sim + pop_w * pop_n + 0.12 * vote_n + novelty_w * novelty
+        if m["id"] in liked_set:
+            score += 0.22
+        if m["id"] in disliked_set:
+            score -= 0.35
 
         if constraints.get("more_hopeful"):
             genres = _genre_ids(m)
             if GENRE_IDS["comedy"] in genres or GENRE_IDS["family"] in genres or GENRE_IDS["romance"] in genres:
                 score += 0.05
 
+        if like_centroid is not None and m.get("_embedding"):
+            pos = cosine_similarity(like_centroid, m["_embedding"])
+            score += 0.12 * max(0.0, pos)
+
         if centroid is not None and m.get("_embedding"):
             anti = cosine_similarity(centroid, m["_embedding"])
-            score -= 0.12 * max(0.0, anti)
+            score -= 0.22 * max(0.0, anti)
 
         if m.get("_hard_penalty"):
             score -= m["_hard_penalty"]
