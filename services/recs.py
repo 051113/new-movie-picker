@@ -522,6 +522,8 @@ def _reasons_for_movie(movie: Dict[str, Any], context: Dict[str, str], constrain
         reasons.append("Short runtime for an easy start")
     if providers.get("flatrate"):
         reasons.append("Available on streaming subscription now")
+    elif providers.get("rent") or providers.get("buy"):
+        reasons.append("Available to rent or buy now")
     if constraints.get("only_streaming_now"):
         reasons.append("Matches your streaming-only constraint")
     if constraints.get("shorter") and runtime and runtime <= 100:
@@ -565,6 +567,35 @@ def _fetch_details_and_providers(
                 row["_matched_seed_ids"].append(seed_id)
         enriched.append(row)
     return enriched
+
+
+def _normalize_provider_name(name: str) -> str:
+    raw = (name or "").strip().lower()
+    compact = "".join(ch for ch in raw if ch.isalnum())
+    if not compact:
+        return ""
+    if "appletv" in compact or compact in {"itunes", "apple"}:
+        return "apple_tv"
+    return compact
+
+
+def _provider_name_set(movie: Dict[str, Any], buckets: Sequence[str]) -> set:
+    providers = movie.get("providers", {}) or {}
+    names = set()
+    for bucket in buckets:
+        for row in providers.get(bucket, []) or []:
+            normalized = _normalize_provider_name(row.get("provider_name", ""))
+            if normalized:
+                names.add(normalized)
+    return names
+
+
+def _matches_provider_filter(movie: Dict[str, Any], provider_allow_norm: set, include_transactional: bool) -> bool:
+    if not provider_allow_norm:
+        return True
+    buckets = ["flatrate"] + (["rent", "buy"] if include_transactional else [])
+    available = _provider_name_set(movie, buckets)
+    return bool(available & provider_allow_norm)
 
 
 def get_sectioned_recommendations(
@@ -754,7 +785,11 @@ def get_quick_pick(
 ) -> Dict[str, Any]:
     region = (constraints.get("region") or context.get("region") or "KR").upper()
     time_minutes = context.get("time_minutes")
-    provider_allow = set(constraints.get("provider_names") or [])
+    provider_allow_norm = {
+        _normalize_provider_name(name)
+        for name in (constraints.get("provider_names") or [])
+        if _normalize_provider_name(name)
+    }
 
     quick_constraints = {
         "only_streaming_now": bool(constraints.get("streaming_only")),
@@ -782,35 +817,62 @@ def get_quick_pick(
 
     filtered: List[Dict[str, Any]] = []
     wildcard_filtered: List[Dict[str, Any]] = []
+    filtered_ids: set = set()
+    wildcard_filtered_ids: set = set()
     wildcard_constraints = dict(quick_constraints)
     wildcard_constraints["only_streaming_now"] = False
 
-    for movie in enriched:
-        if movie["id"] in recent_seen_ids:
-            continue
-
+    def _passes_time(movie: Dict[str, Any], relax_time: bool) -> bool:
         runtime = movie.get("runtime")
-        if time_minutes is not None and runtime and runtime > (time_minutes + 10):
-            continue
+        if time_minutes is None or not runtime:
+            return True
+        max_minutes = time_minutes + (35 if relax_time else 10)
+        return runtime <= max_minutes
 
-        if provider_allow and quick_constraints["only_streaming_now"]:
-            flat_names = {p.get("provider_name") for p in (movie.get("providers", {}).get("flatrate", []) or [])}
-            if not (flat_names & provider_allow):
-                continue
+    def _try_append(
+        movie: Dict[str, Any],
+        *,
+        include_transactional: bool,
+        relax_time: bool,
+    ) -> None:
+        if movie["id"] in recent_seen_ids:
+            return
+        if not _passes_time(movie, relax_time=relax_time):
+            return
+        if provider_allow_norm and quick_constraints["only_streaming_now"]:
+            if not _matches_provider_filter(movie, provider_allow_norm, include_transactional=include_transactional):
+                return
 
         ok, reasons, penalty = _hard_filter(movie, context=quick_context, constraints=quick_constraints, region=region)
-        if ok:
+        if ok and movie["id"] not in filtered_ids:
             item = dict(movie)
             item["_hard_reasons"] = reasons
             item["_hard_penalty"] = penalty
             filtered.append(item)
+            filtered_ids.add(movie["id"])
 
         ok_wild, reasons_w, penalty_w = _hard_filter(movie, context=quick_context, constraints=wildcard_constraints, region=region)
-        if ok_wild:
+        if ok_wild and movie["id"] not in wildcard_filtered_ids:
             item_w = dict(movie)
             item_w["_hard_reasons"] = reasons_w
             item_w["_hard_penalty"] = penalty_w
             wildcard_filtered.append(item_w)
+            wildcard_filtered_ids.add(movie["id"])
+
+    for movie in enriched:
+        _try_append(movie, include_transactional=False, relax_time=False)
+
+    # Relaxed fallback passes when strict filters are too sparse (common with Apple TV).
+    if quick_constraints["only_streaming_now"] and provider_allow_norm and len(filtered) < 3:
+        for movie in enriched:
+            _try_append(movie, include_transactional=True, relax_time=False)
+            if len(filtered) >= 3:
+                break
+    if quick_constraints["only_streaming_now"] and provider_allow_norm and len(filtered) < 3:
+        for movie in enriched:
+            _try_append(movie, include_transactional=True, relax_time=True)
+            if len(filtered) >= 3:
+                break
 
     if not filtered:
         # Last fallback to popular list in region.
@@ -818,6 +880,9 @@ def get_quick_pick(
             try:
                 bundle = tmdb.get_movie_bundle(m["id"], region=region)
                 m = {**m, "runtime": bundle["runtime"], "providers": bundle["providers"], "provider_age_days": bundle["provider_age_days"], "genres": bundle["details"].get("genres", []), "keywords": bundle["details"].get("keywords", {}).get("keywords", [])}
+                if provider_allow_norm and quick_constraints["only_streaming_now"]:
+                    if not _matches_provider_filter(m, provider_allow_norm, include_transactional=True):
+                        continue
                 filtered.append(m)
                 wildcard_filtered.append(dict(m))
                 if len(filtered) >= 15:

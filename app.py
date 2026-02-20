@@ -119,6 +119,9 @@ TRANSLATIONS = {
         "refine_more_indie": "More indie",
         "refine_surprise": "Surprise me",
         "settings": "Settings",
+        "user_id": "User ID",
+        "user_id_help": "Use your own ID to keep a separate recommendation profile.",
+        "active_user": "Active user",
         "language": "Language",
         "language_english": "English",
         "language_korean": "Korean",
@@ -206,6 +209,9 @@ TRANSLATIONS["ko"].update(
         "add_ai_angle": "AI 관점 추가",
         "tell_us_why": "이유 알려주기",
         "save_reason": "이유 저장",
+        "user_id": "사용자 ID",
+        "user_id_help": "고유 ID를 사용하면 추천 프로필이 분리 저장됩니다.",
+        "active_user": "현재 사용자",
         "language_english": "영어",
         "language_korean": "한국어",
         "who_alone": "혼자",
@@ -245,9 +251,65 @@ def env_or_secret(name: str, default: Optional[str] = None) -> Optional[str]:
     return os.getenv(name, default)
 
 
+def normalize_user_id(raw: str) -> str:
+    cleaned = "".join(ch if (ch.isalnum() or ch in {"-", "_"}) else "_" for ch in (raw or "").strip().lower())
+    cleaned = "_".join(part for part in cleaned.split("_") if part)
+    return (cleaned[:48] or "guest")
+
+
+def load_user_profile_into_state(storage: Storage, user_id: str) -> None:
+    profile = storage.load_profile(user_id) or {}
+    context = dict(profile.get("context") or {})
+    constraints = dict(profile.get("constraints") or {})
+    refinement = context.pop("refinement", None)
+
+    st.session_state.qp_context = context
+    st.session_state.qp_constraints = constraints
+    st.session_state.qp_refinement = refinement
+    st.session_state.qp_results = None
+    st.session_state.skip_reason_slot = None
+    st.session_state.localized_movie_text = {}
+
+    time_minutes = context.get("time_minutes")
+    if time_minutes is None:
+        st.session_state.qp_time = "90"
+    elif time_minutes <= 20:
+        st.session_state.qp_time = "20"
+    elif time_minutes <= 45:
+        st.session_state.qp_time = "45"
+    elif time_minutes <= 110:
+        st.session_state.qp_time = "90"
+    else:
+        st.session_state.qp_time = "120+"
+
+    st.session_state.qp_who = context.get("who", "Alone")
+    st.session_state.qp_intention = context.get("intention", "Engaging Story")
+    st.session_state.qp_energy = context.get("energy", "Balanced")
+    st.session_state.qp_streaming_only = bool(constraints.get("streaming_only", True))
+    st.session_state.qp_region = (constraints.get("region") or context.get("region") or st.session_state.get("qp_region") or "KR").upper()
+    st.session_state.qp_providers = list(constraints.get("provider_names") or [])
+
+
+def persist_profile(storage: Storage) -> None:
+    context = dict(st.session_state.get("qp_context") or {})
+    constraints = dict(st.session_state.get("qp_constraints") or {})
+    context["refinement"] = st.session_state.get("qp_refinement")
+    region = (constraints.get("region") or context.get("region") or env_or_secret("TMDB_REGION", "KR") or "KR").upper()
+    storage.save_profile(
+        st.session_state.user_id,
+        region=region,
+        sliders={},
+        vibe_dials={},
+        constraints=constraints,
+        context=context,
+        exploration_pref=0.5,
+        onboarding_complete=True,
+    )
+
+
 def init_state(storage: Storage) -> None:
     if "user_id" not in st.session_state:
-        st.session_state.user_id = str(uuid.uuid4())
+        st.session_state.user_id = "guest"
     if "lang" not in st.session_state:
         st.session_state.lang = "en"
     if "qp_session_id" not in st.session_state:
@@ -266,6 +328,14 @@ def init_state(storage: Storage) -> None:
         st.session_state.skip_reason_slot = None
     if "localized_movie_text" not in st.session_state:
         st.session_state.localized_movie_text = {}
+    if "qp_streaming_only" not in st.session_state:
+        st.session_state.qp_streaming_only = True
+    if "qp_region" not in st.session_state:
+        st.session_state.qp_region = (env_or_secret("TMDB_REGION", "KR") or "KR").upper()
+    if "qp_providers" not in st.session_state:
+        st.session_state.qp_providers = []
+    if "profile_loaded_for_user" not in st.session_state:
+        st.session_state.profile_loaded_for_user = None
     storage.get_or_create_user(st.session_state.user_id, region=env_or_secret("TMDB_REGION", "KR") or "KR")
 
 
@@ -334,9 +404,13 @@ def quick_input_panel(tmdb: TMDBClient) -> Tuple[Dict[str, Any], Dict[str, Any],
 
         c4, c5 = st.columns([1, 1])
         with c4:
-            streaming_only = st.toggle(t("streaming_only"), value=True)
+            streaming_only = st.toggle(t("streaming_only"), key="qp_streaming_only")
         with c5:
-            region = st.selectbox(t("region"), ["KR", "US", "JP", "GB", "CA", "AU", "DE", "FR", "IN"], index=0)
+            region_options = ["KR", "US", "JP", "GB", "CA", "AU", "DE", "FR", "IN"]
+            active_region = st.session_state.get("qp_region", "KR")
+            if active_region not in region_options:
+                active_region = "KR"
+            region = st.selectbox(t("region"), region_options, index=region_options.index(active_region), key="qp_region")
 
         provider_names: List[str] = []
         if streaming_only:
@@ -344,7 +418,10 @@ def quick_input_panel(tmdb: TMDBClient) -> Tuple[Dict[str, Any], Dict[str, Any],
                 options = tmdb.region_streaming_providers(region=region)
             except Exception:
                 options = []
-            provider_names = st.multiselect(t("providers"), options, default=[])
+            defaults = [p for p in (st.session_state.get("qp_providers") or []) if p in options]
+            provider_names = st.multiselect(t("providers"), options, default=defaults, key="qp_providers")
+        else:
+            st.session_state.qp_providers = []
 
         clicked = st.button(t("pick_for_me"), type="primary", use_container_width=True)
 
@@ -579,6 +656,7 @@ def render_refine(tmdb: TMDBClient, openai_service: OpenAIService, storage: Stor
                         openai_service=openai_service,
                         storage=storage,
                     )
+                persist_profile(storage)
                 st.rerun()
 
 
@@ -586,8 +664,26 @@ def main() -> None:
     st.title("VibeRecs")
     storage = Storage()
     init_state(storage)
+    if st.session_state.profile_loaded_for_user != st.session_state.user_id:
+        load_user_profile_into_state(storage, st.session_state.user_id)
+        st.session_state.profile_loaded_for_user = st.session_state.user_id
 
     st.sidebar.markdown(f"### {t('settings')}")
+    typed_user = st.sidebar.text_input(
+        t("user_id"),
+        value=st.session_state.get("user_id", "guest"),
+        help=t("user_id_help"),
+    )
+    chosen_user = normalize_user_id(typed_user)
+    if chosen_user != st.session_state.user_id:
+        st.session_state.user_id = chosen_user
+        st.session_state.qp_session_id = str(uuid.uuid4())
+        storage.get_or_create_user(chosen_user, region=st.session_state.get("qp_region", "KR"))
+        load_user_profile_into_state(storage, chosen_user)
+        st.session_state.profile_loaded_for_user = chosen_user
+        st.rerun()
+    st.sidebar.caption(f"{t('active_user')}: `{st.session_state.user_id}`")
+
     language_labels = {"en": t("language_english"), "ko": t("language_korean")}
     options = [language_labels["en"], language_labels["ko"]]
     current_label = language_labels["ko"] if st.session_state.lang == "ko" else language_labels["en"]
@@ -627,6 +723,7 @@ def main() -> None:
                     openai_service=openai_service,
                     storage=storage,
                 )
+            persist_profile(storage)
 
         result = st.session_state.qp_results
         if result:
