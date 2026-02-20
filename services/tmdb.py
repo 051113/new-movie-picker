@@ -61,11 +61,45 @@ class TMDBClient:
         data = self._get("/discover/movie", params)
         return data.get("results", [])
 
-    def get_movie_details(self, movie_id: int) -> Dict[str, Any]:
+    @staticmethod
+    def app_language_code(lang: str) -> str:
+        return "ko-KR" if str(lang).lower() == "ko" else "en-US"
+
+    def get_movie_details(self, movie_id: int, language: str = "en-US") -> Dict[str, Any]:
         return self._get(
             f"/movie/{movie_id}",
-            {"append_to_response": "keywords,credits", "language": "en-US"},
+            {"append_to_response": "keywords,credits", "language": language},
         )
+
+    def get_trailer_url(self, movie_id: int, language: str = "en-US") -> Optional[str]:
+        data = self._get(
+            f"/movie/{movie_id}/videos",
+            {
+                "language": language,
+                "include_video_language": "ko,en,null",
+            },
+        )
+        results = data.get("results", []) or []
+        if not results:
+            return None
+
+        # Prefer YouTube trailer first, then teaser, then any YouTube video.
+        def _pick(videos: List[Dict[str, Any]], kind: Optional[str] = None) -> Optional[Dict[str, Any]]:
+            for video in videos:
+                if video.get("site") != "YouTube":
+                    continue
+                if kind and video.get("type") != kind:
+                    continue
+                return video
+            return None
+
+        selected = _pick(results, "Trailer") or _pick(results, "Teaser") or _pick(results, None)
+        if not selected:
+            return None
+        key = selected.get("key")
+        if not key:
+            return None
+        return f"https://www.youtube.com/watch?v={key}"
 
     def get_watch_providers(self, movie_id: int, region: Optional[str] = None) -> Dict[str, Any]:
         reg = (region or self.region).upper()

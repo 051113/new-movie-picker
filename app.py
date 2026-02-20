@@ -147,6 +147,7 @@ TRANSLATIONS = {
         "fallback_reason_1": "Good match for your selected context.",
         "fallback_reason_2": "Fits your current time and energy setting.",
         "fallback_reason_3": "Valid for current streaming constraints.",
+        "watch_trailer": "Watch trailer",
     },
     "ko": {
         "title": "VibeRecs",
@@ -225,6 +226,7 @@ TRANSLATIONS["ko"].update(
         "fallback_reason_1": "지금 선택한 상황과 잘 맞는 작품이에요.",
         "fallback_reason_2": "현재 시간/에너지 설정에 잘 맞아요.",
         "fallback_reason_3": "현재 스트리밍 조건에서 시청 가능해요.",
+        "watch_trailer": "예고편 보기",
     }
 )
 
@@ -262,6 +264,8 @@ def init_state(storage: Storage) -> None:
         st.session_state.qp_results = None
     if "skip_reason_slot" not in st.session_state:
         st.session_state.skip_reason_slot = None
+    if "localized_movie_text" not in st.session_state:
+        st.session_state.localized_movie_text = {}
     storage.get_or_create_user(st.session_state.user_id, region=env_or_secret("TMDB_REGION", "KR") or "KR")
 
 
@@ -387,6 +391,46 @@ def movie_meta_line(movie: Dict[str, Any]) -> str:
     return " • ".join(parts)
 
 
+def _contains_hangul(text: str) -> bool:
+    return any("\uac00" <= ch <= "\ud7a3" for ch in (text or ""))
+
+
+def localized_display_text(movie: Dict[str, Any], tmdb: TMDBClient, openai_service: OpenAIService) -> Tuple[str, str]:
+    title = (movie.get("title") or "").strip()
+    overview = (movie.get("overview") or "").strip()
+    lang = st.session_state.get("lang", "en")
+    if lang != "ko":
+        return title, overview
+
+    movie_id = int(movie.get("id") or 0)
+    cache_key = f"ko:{movie_id}"
+    cached = st.session_state.localized_movie_text.get(cache_key)
+    if cached:
+        return cached.get("title", title), cached.get("overview", overview)
+
+    # First use TMDB localized fields.
+    try:
+        ko_details = tmdb.get_movie_details(movie_id, language=TMDBClient.app_language_code("ko"))
+        title = (ko_details.get("title") or title or "").strip()
+        overview = (ko_details.get("overview") or overview or "").strip()
+    except Exception:
+        pass
+
+    # Fallback: translate to Korean when text is still not Korean.
+    if openai_service.enabled:
+        needs_title = bool(title) and not _contains_hangul(title)
+        needs_overview = bool(overview) and not _contains_hangul(overview)
+        if needs_title or needs_overview:
+            translated = openai_service.translate_lines([title, overview], target_language="Korean")
+            if len(translated) >= 1 and translated[0]:
+                title = translated[0]
+            if len(translated) >= 2 and translated[1]:
+                overview = translated[1]
+
+    st.session_state.localized_movie_text[cache_key] = {"title": title, "overview": overview}
+    return title, overview
+
+
 def render_why(
     slot_key: str,
     movie: Dict[str, Any],
@@ -489,10 +533,18 @@ def render_card(slot_key: str, slot_title: str, movie: Optional[Dict[str, Any]],
         if not movie:
             st.info(t("no_candidate_found"))
             return
+        lang_code = TMDBClient.app_language_code(st.session_state.get("lang", "en"))
+        display_title, display_overview = localized_display_text(movie, tmdb, openai_service)
         poster_or_placeholder(movie, tmdb)
-        st.markdown(f"**{movie.get('title', '-') }**")
+        st.markdown(f"**{display_title or movie.get('title', '-') }**")
         st.caption(movie_meta_line(movie))
-        st.write(textwrap.shorten(movie.get("overview", ""), width=180, placeholder="..."))
+        st.write(textwrap.shorten(display_overview or movie.get("overview", ""), width=180, placeholder="..."))
+        try:
+            trailer_url = tmdb.get_trailer_url(int(movie.get("id", 0)), language=lang_code)
+        except Exception:
+            trailer_url = None
+        if trailer_url:
+            st.markdown(f"[{t('watch_trailer')}]({trailer_url})")
         action_buttons(slot_key, movie, tmdb, openai_service, storage)
         with st.expander(t("why_this")):
             render_why(slot_key, movie, quick_result, openai_service, storage)
