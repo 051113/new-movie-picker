@@ -129,6 +129,7 @@ TRANSLATIONS = {
         "login_required": "Set your user ID and log in to use recommendations.",
         "feedback_applied_like": "Feedback saved. We'll prioritize similar picks.",
         "feedback_applied_dislike": "Feedback saved. We'll avoid similar picks.",
+        "feedback_applied_refine": "Refinement applied. Recommendations updated.",
         "language": "Language",
         "language_english": "English",
         "language_korean": "Korean",
@@ -337,8 +338,10 @@ def init_state(storage: Storage) -> None:
         st.session_state.user_id_input = st.session_state.user_id
     if "logged_in" not in st.session_state:
         st.session_state.logged_in = False
-    if "feedback_notice" not in st.session_state:
-        st.session_state.feedback_notice = None
+    if "feedback_notice_slot" not in st.session_state:
+        st.session_state.feedback_notice_slot = None
+    if "refine_notice" not in st.session_state:
+        st.session_state.refine_notice = None
     storage.get_or_create_user(st.session_state.user_id, region=env_or_secret("TMDB_REGION", "KR") or "KR")
 
 
@@ -570,13 +573,13 @@ def action_buttons(
     with cols[0]:
         if st.button(t("like"), key=f"like_{slot_key}_{movie['id']}", use_container_width=True):
             storage.log_interaction(st.session_state.user_id, int(movie["id"]), "like", session_id=st.session_state.qp_session_id, ranking_version="quick_pick")
-            st.session_state.feedback_notice = t("feedback_applied_like")
+            st.session_state.feedback_notice_slot = (slot_key, int(movie["id"]), t("feedback_applied_like"))
             st.rerun()
     with cols[1]:
         if st.button(t("dislike"), key=f"dislike_{slot_key}_{movie['id']}", use_container_width=True):
             storage.log_interaction(st.session_state.user_id, int(movie["id"]), "dislike", session_id=st.session_state.qp_session_id, ranking_version="quick_pick")
             st.session_state.skip_reason_slot = (slot_key, int(movie["id"]))
-            st.session_state.feedback_notice = t("feedback_applied_dislike")
+            st.session_state.feedback_notice_slot = (slot_key, int(movie["id"]), t("feedback_applied_dislike"))
             st.rerun()
     with cols[2]:
         if st.button(t("renew"), key=f"renew_{slot_key}_{movie['id']}", use_container_width=True):
@@ -602,6 +605,10 @@ def action_buttons(
                 current["context_hash"] = refreshed.get("context_hash", current.get("context_hash", ""))
                 st.session_state.qp_results = current
             st.rerun()
+    with cols[0]:
+        notice = st.session_state.get("feedback_notice_slot")
+        if notice and notice[0] == slot_key and notice[1] == int(movie["id"]):
+            st.caption(str(notice[2]))
 
 
 def skip_reason_panel(slot_key: str, storage: Storage) -> None:
@@ -685,7 +692,11 @@ def render_refine(tmdb: TMDBClient, openai_service: OpenAIService, storage: Stor
                         storage=storage,
                     )
                 persist_profile(storage)
+                st.session_state.refine_notice = t("feedback_applied_refine")
                 st.rerun()
+    if st.session_state.get("refine_notice"):
+        st.caption(str(st.session_state.refine_notice))
+        st.session_state.refine_notice = None
 
 
 def main() -> None:
@@ -715,16 +726,6 @@ def main() -> None:
                 st.session_state.profile_loaded_for_user = chosen_user
                 st.rerun()
     else:
-        if st.sidebar.button(t("switch_user"), type="secondary", use_container_width=True):
-            if raw_user_input:
-                chosen_user = normalize_user_id(raw_user_input)
-                if chosen_user != st.session_state.user_id:
-                    st.session_state.user_id = chosen_user
-                    st.session_state.qp_session_id = str(uuid.uuid4())
-                    storage.get_or_create_user(chosen_user, region=st.session_state.get("qp_region", "KR"))
-                    load_user_profile_into_state(storage, chosen_user)
-                    st.session_state.profile_loaded_for_user = chosen_user
-                    st.rerun()
         if st.sidebar.button(t("log_out"), type="secondary", use_container_width=True):
             st.session_state.logged_in = False
             st.session_state.qp_results = None
@@ -750,9 +751,6 @@ def main() -> None:
     if st.session_state.profile_loaded_for_user != st.session_state.user_id:
         load_user_profile_into_state(storage, st.session_state.user_id)
         st.session_state.profile_loaded_for_user = st.session_state.user_id
-    if st.session_state.get("feedback_notice"):
-        st.success(str(st.session_state.feedback_notice))
-        st.session_state.feedback_notice = None
 
     tmdb_api_key = env_or_secret("TMDB_API_KEY")
     openai_api_key = env_or_secret("OPENAI_API_KEY")
