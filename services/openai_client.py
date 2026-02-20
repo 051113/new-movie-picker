@@ -50,6 +50,7 @@ class OpenAIService:
         user_context: Dict[str, Any],
         profile_hash: str,
         context_hash: str,
+        language: str = "en",
     ) -> List[str]:
         movie_id = int(movie.get("id", 0))
         cached = self.storage.why_cache_get(movie_id, profile_hash, context_hash)
@@ -59,6 +60,7 @@ class OpenAIService:
         if not self.client:
             return []
 
+        target_language = "Korean" if language == "ko" else "English"
         payload = {
             "movie": {
                 "title": movie.get("title"),
@@ -69,10 +71,12 @@ class OpenAIService:
             "context": user_context,
             "deterministic_bullets": deterministic_bullets,
             "task": "Add 1-2 extra spoiler-free bullets. No plot reveals, twists, deaths, endings.",
+            "language": target_language,
         }
         instructions = (
             "Return exactly 1-2 concise bullet points. Keep them spoiler-free. "
-            "Do not mention specific plot events."
+            "Do not mention specific plot events. "
+            f"Write all output in {target_language}."
         )
         try:
             resp = self.client.responses.create(
@@ -94,3 +98,31 @@ class OpenAIService:
             serialized = "\n".join(f"- {line}" for line in lines)
             self.storage.why_cache_set(movie_id, profile_hash, context_hash, serialized)
         return lines
+
+    def translate_lines(self, lines: List[str], target_language: str) -> List[str]:
+        if not lines:
+            return []
+        if not self.client:
+            return lines
+        instructions = (
+            f"Translate each input line into {target_language}. "
+            "Preserve line count and order. Return plain lines only."
+        )
+        payload = {"lines": lines}
+        try:
+            resp = self.client.responses.create(
+                model="gpt-4o-mini",
+                input=[
+                    {"role": "system", "content": instructions},
+                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+                ],
+                max_output_tokens=220,
+                temperature=0.0,
+            )
+            raw = (resp.output_text or "").strip()
+            translated = [line.strip("- ").strip() for line in raw.splitlines() if line.strip()]
+            if len(translated) == len(lines):
+                return translated
+            return translated[: len(lines)] if translated else lines
+        except Exception:
+            return lines

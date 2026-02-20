@@ -98,9 +98,9 @@ TRANSLATIONS = {
         "wildcard": "Wildcard",
         "why_this": "Why this?",
         "add_ai_angle": "Add AI angle",
-        "like": "Like",
-        "renew": "Renew",
-        "dislike": "Dislike",
+        "like": "👍 Like",
+        "renew": "🔄 Renew",
+        "dislike": "👎 Dislike",
         "tell_us_why": "Tell us why",
         "reason_default": "Doesn't look interesting",
         "reason_mood": "Not in the mood",
@@ -120,6 +120,21 @@ TRANSLATIONS = {
         "refine_surprise": "Surprise me",
         "settings": "Settings",
         "language": "Language",
+        "language_english": "English",
+        "language_korean": "Korean",
+        "who_alone": "Alone",
+        "who_partner": "Partner",
+        "who_friends": "Friends",
+        "who_family": "Family",
+        "intention_comfort_cozy": "Comfort & Cozy",
+        "intention_light_fun": "Light & Fun",
+        "intention_engaging_story": "Engaging Story",
+        "intention_intense_thrilling": "Intense & Thrilling",
+        "intention_emotional_deep": "Emotional & Deep",
+        "intention_surprise_me": "Surprise Me",
+        "energy_chill": "Chill",
+        "energy_balanced": "Balanced",
+        "energy_high": "High",
         "soft_reset": "Soft reset (last 20 interactions)",
         "full_reset": "Full reset",
         "tmdb_required": "TMDB_API_KEY is required. Add it in .env or Streamlit secrets.",
@@ -127,6 +142,11 @@ TRANSLATIONS = {
         "updating": "Finding your three picks...",
         "runtime_na": "Runtime not available",
         "availability_unknown": "Availability unknown",
+        "no_image_found": "No Image Found",
+        "no_candidate_found": "No candidate found.",
+        "fallback_reason_1": "Good match for your selected context.",
+        "fallback_reason_2": "Fits your current time and energy setting.",
+        "fallback_reason_3": "Valid for current streaming constraints.",
     },
     "ko": {
         "title": "VibeRecs",
@@ -175,6 +195,38 @@ TRANSLATIONS = {
         "availability_unknown": "시청 가능 정보 없음",
     },
 }
+
+# Override critical Korean labels with clean UTF-8 values to avoid mojibake issues.
+TRANSLATIONS["ko"].update(
+    {
+        "like": "👍 좋아요",
+        "renew": "🔄 새로고침",
+        "dislike": "👎 싫어요",
+        "add_ai_angle": "AI 관점 추가",
+        "tell_us_why": "이유 알려주기",
+        "save_reason": "이유 저장",
+        "language_english": "영어",
+        "language_korean": "한국어",
+        "who_alone": "혼자",
+        "who_partner": "연인",
+        "who_friends": "친구",
+        "who_family": "가족",
+        "intention_comfort_cozy": "편안하고 포근하게",
+        "intention_light_fun": "가볍고 재미있게",
+        "intention_engaging_story": "몰입되는 이야기",
+        "intention_intense_thrilling": "강렬하고 스릴 있게",
+        "intention_emotional_deep": "감성적이고 깊게",
+        "intention_surprise_me": "랜덤 추천",
+        "energy_chill": "차분하게",
+        "energy_balanced": "적당히",
+        "energy_high": "에너지 높게",
+        "no_image_found": "이미지를 찾을 수 없어요",
+        "no_candidate_found": "추천 후보를 찾지 못했어요.",
+        "fallback_reason_1": "지금 선택한 상황과 잘 맞는 작품이에요.",
+        "fallback_reason_2": "현재 시간/에너지 설정에 잘 맞아요.",
+        "fallback_reason_3": "현재 스트리밍 조건에서 시청 가능해요.",
+    }
+)
 
 
 def t(key: str) -> str:
@@ -234,30 +286,47 @@ def pick_single(label: str, options: List[str], default: str, key: str) -> str:
     return st.radio(label, options, index=options.index(default) if default in options else 0, horizontal=True, key=key)
 
 
+def pick_single_mapped(label: str, options: List[Tuple[str, str]], default_value: str, key: str) -> str:
+    localized_options = [t(label_key) for label_key, _ in options]
+    value_by_label = {t(label_key): value for label_key, value in options}
+    default_label = next((t(label_key) for label_key, value in options if value == default_value), localized_options[0])
+    picked_label = pick_single(label, localized_options, default_label, key)
+    return value_by_label.get(picked_label, default_value)
+
+
 def quick_input_panel(tmdb: TMDBClient) -> Tuple[Dict[str, Any], Dict[str, Any], bool]:
     st.markdown(f"## {t('quick_pick')}")
     times = ["20", "45", "90", "120+"]
-    who_options = ["Alone", "Partner", "Friends", "Family"]
-    intentions = [
-        "Comfort & Cozy",
-        "Light & Fun",
-        "Engaging Story",
-        "Intense & Thrilling",
-        "Emotional & Deep",
-        "Surprise Me",
+    who_options = [
+        ("who_alone", "Alone"),
+        ("who_partner", "Partner"),
+        ("who_friends", "Friends"),
+        ("who_family", "Family"),
     ]
-    energies = ["Chill", "Balanced", "High"]
+    intentions = [
+        ("intention_comfort_cozy", "Comfort & Cozy"),
+        ("intention_light_fun", "Light & Fun"),
+        ("intention_engaging_story", "Engaging Story"),
+        ("intention_intense_thrilling", "Intense & Thrilling"),
+        ("intention_emotional_deep", "Emotional & Deep"),
+        ("intention_surprise_me", "Surprise Me"),
+    ]
+    energies = [
+        ("energy_chill", "Chill"),
+        ("energy_balanced", "Balanced"),
+        ("energy_high", "High"),
+    ]
 
     with st.container(border=True):
         c1, c2, c3 = st.columns(3)
         with c1:
             time_choice = pick_single(t("time_available"), times, "90", "qp_time")
         with c2:
-            who = pick_single(t("who"), who_options, "Alone", "qp_who")
+            who = pick_single_mapped(t("who"), who_options, "Alone", "qp_who")
         with c3:
-            energy = pick_single(t("energy"), energies, "Balanced", "qp_energy")
+            energy = pick_single_mapped(t("energy"), energies, "Balanced", "qp_energy")
 
-        intention = pick_single(t("intention"), intentions, "Engaging Story", "qp_intention")
+        intention = pick_single_mapped(t("intention"), intentions, "Engaging Story", "qp_intention")
 
         c4, c5 = st.columns([1, 1])
         with c4:
@@ -297,10 +366,10 @@ def poster_or_placeholder(movie: Dict[str, Any], tmdb: TMDBClient) -> None:
         st.image(poster, use_container_width=True)
         return
     st.markdown(
-        """
+        f"""
         <div style="aspect-ratio:2/3;background:#e9eef5;border:1px solid #d8e2f0;border-radius:10px;
                     display:flex;align-items:center;justify-content:center;color:#63758a;font-weight:600;">
-            No Image Found
+            {t("no_image_found")}
         </div>
         """,
         unsafe_allow_html=True,
@@ -325,9 +394,12 @@ def render_why(
     openai_service: OpenAIService,
     storage: Storage,
 ) -> None:
+    lang = st.session_state.get("lang", "en")
     reasons = quick_result.get("reasons", {}).get(slot_key, [])[:3]
     if not reasons:
-        reasons = ["Good match for your selected context.", "Fits your current time and energy setting.", "Valid for current streaming constraints."]
+        reasons = [t("fallback_reason_1"), t("fallback_reason_2"), t("fallback_reason_3")]
+    if lang == "ko":
+        reasons = openai_service.translate_lines(reasons, target_language="Korean")
     for r in reasons:
         st.markdown(f"- {r}")
     if openai_service.enabled and st.button(t("add_ai_angle"), key=f"ai_why_{slot_key}_{movie['id']}", type="secondary"):
@@ -336,7 +408,8 @@ def render_why(
             deterministic_bullets=reasons,
             user_context={"context": st.session_state.qp_context, "constraints": st.session_state.qp_constraints, "refinement": st.session_state.qp_refinement},
             profile_hash=quick_result.get("profile_hash", ""),
-            context_hash=quick_result.get("context_hash", ""),
+            context_hash=f"{quick_result.get('context_hash', '')}|lang:{lang}",
+            language=lang,
         )
         for line in extra:
             st.markdown(f"- {line}")
@@ -354,6 +427,10 @@ def action_buttons(
         if st.button(t("like"), key=f"like_{slot_key}_{movie['id']}", use_container_width=True):
             storage.log_interaction(st.session_state.user_id, int(movie["id"]), "like", session_id=st.session_state.qp_session_id, ranking_version="quick_pick")
     with cols[1]:
+        if st.button(t("dislike"), key=f"dislike_{slot_key}_{movie['id']}", use_container_width=True):
+            storage.log_interaction(st.session_state.user_id, int(movie["id"]), "dislike", session_id=st.session_state.qp_session_id, ranking_version="quick_pick")
+            st.session_state.skip_reason_slot = (slot_key, int(movie["id"]))
+    with cols[2]:
         if st.button(t("renew"), key=f"renew_{slot_key}_{movie['id']}", use_container_width=True):
             storage.log_interaction(st.session_state.user_id, int(movie["id"]), "seen", session_id=st.session_state.qp_session_id, ranking_version="quick_pick")
             with st.spinner(t("updating")):
@@ -377,10 +454,6 @@ def action_buttons(
                 current["context_hash"] = refreshed.get("context_hash", current.get("context_hash", ""))
                 st.session_state.qp_results = current
             st.rerun()
-    with cols[2]:
-        if st.button(t("dislike"), key=f"dislike_{slot_key}_{movie['id']}", use_container_width=True):
-            storage.log_interaction(st.session_state.user_id, int(movie["id"]), "dislike", session_id=st.session_state.qp_session_id, ranking_version="quick_pick")
-            st.session_state.skip_reason_slot = (slot_key, int(movie["id"]))
 
 
 def skip_reason_panel(slot_key: str, storage: Storage) -> None:
@@ -414,7 +487,7 @@ def render_card(slot_key: str, slot_title: str, movie: Optional[Dict[str, Any]],
     with st.container(border=True):
         st.markdown(f"### {slot_title}")
         if not movie:
-            st.info("No candidate found.")
+            st.info(t("no_candidate_found"))
             return
         poster_or_placeholder(movie, tmdb)
         st.markdown(f"**{movie.get('title', '-') }**")
@@ -463,9 +536,11 @@ def main() -> None:
     init_state(storage)
 
     st.sidebar.markdown(f"### {t('settings')}")
-    current = "한국어" if st.session_state.lang == "ko" else "English"
-    picked = st.sidebar.selectbox(t("language"), ["English", "한국어"], index=["English", "한국어"].index(current))
-    st.session_state.lang = "ko" if picked == "한국어" else "en"
+    language_labels = {"en": t("language_english"), "ko": t("language_korean")}
+    options = [language_labels["en"], language_labels["ko"]]
+    current_label = language_labels["ko"] if st.session_state.lang == "ko" else language_labels["en"]
+    picked = st.sidebar.selectbox(t("language"), options, index=options.index(current_label))
+    st.session_state.lang = "ko" if picked == language_labels["ko"] else "en"
     if st.sidebar.button(t("soft_reset"), type="secondary", use_container_width=True):
         soft_reset(storage)
     if st.sidebar.button(t("full_reset"), type="secondary", use_container_width=True):
