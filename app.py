@@ -99,8 +99,8 @@ TRANSLATIONS = {
         "why_this": "Why this?",
         "add_ai_angle": "Add AI angle",
         "like": "Like",
-        "seen_it": "Seen it",
-        "skip": "Skip",
+        "renew": "Renew",
+        "dislike": "Dislike",
         "tell_us_why": "Tell us why",
         "reason_default": "Doesn't look interesting",
         "reason_mood": "Not in the mood",
@@ -145,8 +145,8 @@ TRANSLATIONS = {
         "why_this": "왜 이 작품인가요?",
         "add_ai_angle": "AI 관점 추가",
         "like": "좋아요",
-        "seen_it": "이미 봤어요",
-        "skip": "넘기기",
+        "renew": "새로 고침",
+        "dislike": "싫어요",
         "tell_us_why": "이유 알려주기",
         "reason_default": "흥미가 없어요",
         "reason_mood": "지금 기분이 아니에요",
@@ -342,33 +342,62 @@ def render_why(
             st.markdown(f"- {line}")
 
 
-def action_buttons(slot_key: str, movie: Dict[str, Any], storage: Storage) -> None:
+def action_buttons(
+    slot_key: str,
+    movie: Dict[str, Any],
+    tmdb: TMDBClient,
+    openai_service: OpenAIService,
+    storage: Storage,
+) -> None:
     cols = st.columns(3)
     with cols[0]:
         if st.button(t("like"), key=f"like_{slot_key}_{movie['id']}", use_container_width=True):
             storage.log_interaction(st.session_state.user_id, int(movie["id"]), "like", session_id=st.session_state.qp_session_id, ranking_version="quick_pick")
     with cols[1]:
-        if st.button(t("seen_it"), key=f"seen_{slot_key}_{movie['id']}", use_container_width=True):
+        if st.button(t("renew"), key=f"renew_{slot_key}_{movie['id']}", use_container_width=True):
             storage.log_interaction(st.session_state.user_id, int(movie["id"]), "seen", session_id=st.session_state.qp_session_id, ranking_version="quick_pick")
+            with st.spinner(t("updating")):
+                refreshed = get_quick_pick(
+                    user_id=st.session_state.user_id,
+                    context=st.session_state.qp_context,
+                    constraints=st.session_state.qp_constraints,
+                    refinement=st.session_state.qp_refinement,
+                    tmdb=tmdb,
+                    openai_service=openai_service,
+                    storage=storage,
+                )
+                current = dict(st.session_state.qp_results or {})
+                current[slot_key] = refreshed.get(slot_key)
+                current_reasons = dict(current.get("reasons", {}))
+                refreshed_reasons = refreshed.get("reasons", {}) if isinstance(refreshed, dict) else {}
+                if isinstance(refreshed_reasons, dict):
+                    current_reasons[slot_key] = refreshed_reasons.get(slot_key, [])
+                current["reasons"] = current_reasons
+                current["profile_hash"] = refreshed.get("profile_hash", current.get("profile_hash", ""))
+                current["context_hash"] = refreshed.get("context_hash", current.get("context_hash", ""))
+                st.session_state.qp_results = current
+            st.rerun()
     with cols[2]:
-        if st.button(t("skip"), key=f"skip_{slot_key}_{movie['id']}", use_container_width=True):
+        if st.button(t("dislike"), key=f"dislike_{slot_key}_{movie['id']}", use_container_width=True):
             storage.log_interaction(st.session_state.user_id, int(movie["id"]), "dislike", session_id=st.session_state.qp_session_id, ranking_version="quick_pick")
             st.session_state.skip_reason_slot = (slot_key, int(movie["id"]))
 
 
-def skip_reason_panel(storage: Storage) -> None:
+def skip_reason_panel(slot_key: str, storage: Storage) -> None:
     slot = st.session_state.skip_reason_slot
     if not slot:
         return
-    _, movie_id = slot
+    active_slot_key, movie_id = slot
+    if active_slot_key != slot_key:
+        return
     options = [t("reason_default"), t("reason_mood"), t("reason_long"), t("reason_seen"), t("reason_service")]
     with st.container(border=True):
         st.caption(t("tell_us_why"))
         if hasattr(st, "pills"):
-            reason = st.pills(t("tell_us_why"), options, selection_mode="single", default=options[0])
+            reason = st.pills(t("tell_us_why"), options, selection_mode="single", default=options[0], key=f"dislike_reason_{slot_key}_{movie_id}")
         else:
-            reason = st.selectbox(t("tell_us_why"), options, index=0)
-        if st.button(t("save_reason"), type="secondary"):
+            reason = st.selectbox(t("tell_us_why"), options, index=0, key=f"dislike_reason_{slot_key}_{movie_id}")
+        if st.button(t("save_reason"), key=f"save_dislike_reason_{slot_key}_{movie_id}", type="secondary"):
             storage.log_interaction(
                 st.session_state.user_id,
                 movie_id,
@@ -391,9 +420,10 @@ def render_card(slot_key: str, slot_title: str, movie: Optional[Dict[str, Any]],
         st.markdown(f"**{movie.get('title', '-') }**")
         st.caption(movie_meta_line(movie))
         st.write(textwrap.shorten(movie.get("overview", ""), width=180, placeholder="..."))
-        action_buttons(slot_key, movie, storage)
+        action_buttons(slot_key, movie, tmdb, openai_service, storage)
         with st.expander(t("why_this")):
             render_why(slot_key, movie, quick_result, openai_service, storage)
+    skip_reason_panel(slot_key, storage)
 
 
 def render_refine(tmdb: TMDBClient, openai_service: OpenAIService, storage: Storage) -> None:
@@ -479,7 +509,6 @@ def main() -> None:
                 render_card("backup", t("backup"), result.get("backup"), tmdb, openai_service, storage, result)
             with c2:
                 render_card("wildcard", t("wildcard"), result.get("wildcard"), tmdb, openai_service, storage, result)
-            skip_reason_panel(storage)
             render_refine(tmdb, openai_service, storage)
     except TMDBError as exc:
         st.error(f"TMDB error: {exc}")
