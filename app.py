@@ -695,7 +695,6 @@ def main() -> None:
     )
     if st.sidebar.button(t("switch_user"), type="secondary", use_container_width=True):
         chosen_user = normalize_user_id(st.session_state.get("user_id_input", ""))
-        st.session_state.user_id_input = chosen_user
         if chosen_user != st.session_state.user_id:
             st.session_state.user_id = chosen_user
             st.session_state.qp_session_id = str(uuid.uuid4())
