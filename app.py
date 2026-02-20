@@ -86,6 +86,7 @@ TRANSLATIONS = {
         "title": "VibeRecs",
         "quick_pick": "Quick Pick",
         "time_available": "Time available",
+        "time_minutes": "Minutes available",
         "who": "Who",
         "intention": "Emotional intention",
         "energy": "Energy",
@@ -98,9 +99,9 @@ TRANSLATIONS = {
         "wildcard": "Wildcard",
         "why_this": "Why this?",
         "add_ai_angle": "Add AI angle",
-        "like": "👍 Like",
-        "renew": "🔄 Renew",
-        "dislike": "👎 Dislike",
+        "like": "\U0001F44D Like",
+        "renew": "\U0001F504 Renew",
+        "dislike": "\U0001F44E Dislike",
         "tell_us_why": "Tell us why",
         "reason_default": "Doesn't look interesting",
         "reason_mood": "Not in the mood",
@@ -146,6 +147,9 @@ TRANSLATIONS = {
         "updating": "Finding your three picks...",
         "runtime_na": "Runtime not available",
         "availability_unknown": "Availability unknown",
+        "available_stream": "Stream",
+        "available_rent": "Rent",
+        "available_buy": "Buy",
         "no_image_found": "No Image Found",
         "no_candidate_found": "No candidate found.",
         "fallback_reason_1": "Good match for your selected context.",
@@ -156,31 +160,32 @@ TRANSLATIONS = {
     "ko": {
         "title": "VibeRecs",
         "quick_pick": "빠른 추천",
-        "time_available": "가능 시간",
-        "who": "누구와 함께 보나요?",
+        "time_available": "가능한 시간",
+        "time_minutes": "시청 가능 시간(분)",
+        "who": "누구와 보나요",
         "intention": "감정/분위기 의도",
         "energy": "에너지",
-        "streaming_only": "스트리밍 가능만",
+        "streaming_only": "스트리밍만",
         "region": "지역",
         "providers": "플랫폼",
         "pick_for_me": "추천 받기",
         "top_pick": "최우선 추천",
-        "backup": "대안 추천",
+        "backup": "대체 추천",
         "wildcard": "와일드카드",
         "why_this": "왜 이 작품인가요?",
         "add_ai_angle": "AI 관점 추가",
-        "like": "좋아요",
-        "renew": "새로 고침",
-        "dislike": "싫어요",
+        "like": "\U0001F44D 좋아요",
+        "renew": "\U0001F504 새로고침",
+        "dislike": "\U0001F44E 싫어요",
         "tell_us_why": "이유 알려주기",
         "reason_default": "흥미가 없어요",
         "reason_mood": "지금 기분이 아니에요",
         "reason_long": "너무 길어요",
         "reason_seen": "이미 봤어요",
-        "reason_service": "이 서비스를 사용하지 않아요",
+        "reason_service": "이 서비스를 이용하지 않아요",
         "save_reason": "이유 저장",
-        "refine": "세부 조정",
-        "refine_more_exciting": "더 짜릿하게",
+        "refine": "더 조정",
+        "refine_more_exciting": "더 신나게",
         "refine_funnier": "더 웃기게",
         "refine_more_emotional": "더 감성적으로",
         "refine_lighter": "더 가볍게",
@@ -190,30 +195,11 @@ TRANSLATIONS = {
         "refine_more_indie": "더 인디하게",
         "refine_surprise": "깜짝 추천",
         "settings": "설정",
-        "language": "언어",
-        "soft_reset": "소프트 초기화 (최근 20개)",
-        "full_reset": "전체 초기화",
-        "tmdb_required": "TMDB_API_KEY가 필요합니다. .env 또는 Streamlit secrets에 추가하세요.",
-        "openai_missing": "OPENAI_API_KEY 없이도 동작합니다.",
-        "updating": "맞춤 3개를 찾는 중...",
-        "runtime_na": "러닝타임 정보 없음",
-        "availability_unknown": "시청 가능 정보 없음",
-    },
-}
-
-# Override critical Korean labels with clean UTF-8 values to avoid mojibake issues.
-TRANSLATIONS["ko"].update(
-    {
-        "like": "👍 좋아요",
-        "renew": "🔄 새로고침",
-        "dislike": "👎 싫어요",
-        "add_ai_angle": "AI 관점 추가",
-        "tell_us_why": "이유 알려주기",
-        "save_reason": "이유 저장",
         "user_id": "사용자 ID",
         "user_id_help": "고유 ID를 사용하면 추천 프로필이 분리 저장됩니다.",
         "active_user": "현재 사용자",
         "switch_user": "사용자 전환",
+        "language": "언어",
         "language_english": "영어",
         "language_korean": "한국어",
         "who_alone": "혼자",
@@ -229,15 +215,24 @@ TRANSLATIONS["ko"].update(
         "energy_chill": "차분하게",
         "energy_balanced": "적당히",
         "energy_high": "에너지 높게",
+        "soft_reset": "소프트 초기화 (최근 20개 상호작용)",
+        "full_reset": "전체 초기화",
+        "tmdb_required": "TMDB_API_KEY가 필요합니다. .env 또는 Streamlit secrets에 추가하세요.",
+        "openai_missing": "OPENAI_API_KEY가 없어 대체 모드로 동작합니다.",
+        "updating": "맞춤 3개를 찾는 중...",
+        "runtime_na": "러닝타임 정보 없음",
+        "availability_unknown": "시청 가능 정보 없음",
+        "available_stream": "구독",
+        "available_rent": "대여",
+        "available_buy": "구매",
         "no_image_found": "이미지를 찾을 수 없어요",
         "no_candidate_found": "추천 후보를 찾지 못했어요.",
         "fallback_reason_1": "지금 선택한 상황과 잘 맞는 작품이에요.",
         "fallback_reason_2": "현재 시간/에너지 설정에 잘 맞아요.",
         "fallback_reason_3": "현재 스트리밍 조건에서 시청 가능해요.",
         "watch_trailer": "예고편 보기",
-    }
-)
-
+    },
+}
 
 def t(key: str) -> str:
     lang = st.session_state.get("lang", "en")
@@ -274,17 +269,8 @@ def load_user_profile_into_state(storage: Storage, user_id: str) -> None:
     st.session_state.skip_reason_slot = None
     st.session_state.localized_movie_text = {}
 
-    time_minutes = context.get("time_minutes")
-    if time_minutes is None:
-        st.session_state.qp_time = "90"
-    elif time_minutes <= 20:
-        st.session_state.qp_time = "20"
-    elif time_minutes <= 45:
-        st.session_state.qp_time = "45"
-    elif time_minutes <= 110:
-        st.session_state.qp_time = "90"
-    else:
-        st.session_state.qp_time = "120+"
+    time_minutes = int(context.get("time_minutes") or 90)
+    st.session_state.qp_time_minutes = max(20, min(180, time_minutes))
 
     st.session_state.qp_who = context.get("who", "Alone")
     st.session_state.qp_intention = context.get("intention", "Engaging Story")
@@ -336,6 +322,8 @@ def init_state(storage: Storage) -> None:
         st.session_state.qp_streaming_only = True
     if "qp_region" not in st.session_state:
         st.session_state.qp_region = (env_or_secret("TMDB_REGION", "KR") or "KR").upper()
+    if "qp_time_minutes" not in st.session_state:
+        st.session_state.qp_time_minutes = 90
     if "qp_providers" not in st.session_state:
         st.session_state.qp_providers = []
     if "profile_loaded_for_user" not in st.session_state:
@@ -387,7 +375,6 @@ def pick_single_mapped(label: str, options: List[Tuple[str, str]], default_value
 
 def quick_input_panel(tmdb: TMDBClient) -> Tuple[Dict[str, Any], Dict[str, Any], bool]:
     st.markdown(f"## {t('quick_pick')}")
-    times = ["20", "45", "90", "120+"]
     who_options = [
         ("who_alone", "Alone"),
         ("who_partner", "Partner"),
@@ -411,7 +398,7 @@ def quick_input_panel(tmdb: TMDBClient) -> Tuple[Dict[str, Any], Dict[str, Any],
     with st.container(border=True):
         c1, c2, c3 = st.columns(3)
         with c1:
-            time_choice = pick_single(t("time_available"), times, "90", "qp_time")
+            time_minutes = st.slider(t("time_minutes"), min_value=20, max_value=180, step=5, key="qp_time_minutes")
         with c2:
             who = pick_single_mapped(t("who"), who_options, "Alone", "qp_who")
         with c3:
@@ -429,20 +416,8 @@ def quick_input_panel(tmdb: TMDBClient) -> Tuple[Dict[str, Any], Dict[str, Any],
                 active_region = "KR"
             region = st.selectbox(t("region"), region_options, index=region_options.index(active_region), key="qp_region")
 
-        provider_names: List[str] = []
-        if streaming_only:
-            try:
-                options = tmdb.region_streaming_providers(region=region)
-            except Exception:
-                options = []
-            defaults = [p for p in (st.session_state.get("qp_providers") or []) if p in options]
-            provider_names = st.multiselect(t("providers"), options, default=defaults, key="qp_providers")
-        else:
-            st.session_state.qp_providers = []
-
         clicked = st.button(t("pick_for_me"), type="primary", use_container_width=True)
 
-    time_minutes = {"20": 20, "45": 45, "90": 90, "120+": 150}.get(time_choice or "90", 90)
     context = {
         "time_minutes": time_minutes,
         "who": who or "Alone",
@@ -453,7 +428,7 @@ def quick_input_panel(tmdb: TMDBClient) -> Tuple[Dict[str, Any], Dict[str, Any],
     constraints = {
         "streaming_only": bool(streaming_only),
         "region": region,
-        "provider_names": provider_names,
+        "provider_names": [],
     }
     return context, constraints, clicked
 
@@ -482,7 +457,28 @@ def movie_meta_line(movie: Dict[str, Any]) -> str:
     rating = movie.get("vote_average")
     rating_text = f"★ {float(rating):.1f}" if rating else ""
     parts = [p for p in [year, runtime_text, genres, rating_text] if p]
-    return " • ".join(parts)
+    return " | ".join(parts)
+
+
+def availability_line(movie: Dict[str, Any]) -> str:
+    providers = movie.get("providers", {}) or {}
+
+    def _names(bucket: str) -> str:
+        rows = providers.get(bucket, []) or []
+        names = [r.get("provider_name", "") for r in rows if r.get("provider_name")]
+        return ", ".join(names[:3])
+
+    parts = []
+    stream = _names("flatrate")
+    rent = _names("rent")
+    buy = _names("buy")
+    if stream:
+        parts.append(f"{t('available_stream')}: {stream}")
+    if rent:
+        parts.append(f"{t('available_rent')}: {rent}")
+    if buy:
+        parts.append(f"{t('available_buy')}: {buy}")
+    return " | ".join(parts) if parts else t("availability_unknown")
 
 
 def _contains_hangul(text: str) -> bool:
@@ -632,6 +628,7 @@ def render_card(slot_key: str, slot_title: str, movie: Optional[Dict[str, Any]],
         poster_or_placeholder(movie, tmdb)
         st.markdown(f"**{display_title or movie.get('title', '-') }**")
         st.caption(movie_meta_line(movie))
+        st.caption(availability_line(movie))
         st.write(textwrap.shorten(display_overview or movie.get("overview", ""), width=180, placeholder="..."))
         try:
             trailer_url = tmdb.get_trailer_url(int(movie.get("id", 0)), language=lang_code)
@@ -762,3 +759,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
