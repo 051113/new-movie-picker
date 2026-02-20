@@ -122,6 +122,7 @@ TRANSLATIONS = {
         "user_id": "User ID",
         "user_id_help": "Use your own ID to keep a separate recommendation profile.",
         "active_user": "Active user",
+        "switch_user": "Switch user",
         "language": "Language",
         "language_english": "English",
         "language_korean": "Korean",
@@ -212,6 +213,7 @@ TRANSLATIONS["ko"].update(
         "user_id": "사용자 ID",
         "user_id_help": "고유 ID를 사용하면 추천 프로필이 분리 저장됩니다.",
         "active_user": "현재 사용자",
+        "switch_user": "사용자 전환",
         "language_english": "영어",
         "language_korean": "한국어",
         "who_alone": "혼자",
@@ -252,9 +254,11 @@ def env_or_secret(name: str, default: Optional[str] = None) -> Optional[str]:
 
 
 def normalize_user_id(raw: str) -> str:
-    cleaned = "".join(ch if (ch.isalnum() or ch in {"-", "_"}) else "_" for ch in (raw or "").strip().lower())
-    cleaned = "_".join(part for part in cleaned.split("_") if part)
-    return (cleaned[:48] or "guest")
+    cleaned = (raw or "").strip()
+    if not cleaned:
+        return "guest"
+    # Keep user-chosen IDs as-is, only enforce a safe max length.
+    return cleaned[:64]
 
 
 def load_user_profile_into_state(storage: Storage, user_id: str) -> None:
@@ -336,6 +340,8 @@ def init_state(storage: Storage) -> None:
         st.session_state.qp_providers = []
     if "profile_loaded_for_user" not in st.session_state:
         st.session_state.profile_loaded_for_user = None
+    if "user_id_input" not in st.session_state:
+        st.session_state.user_id_input = st.session_state.user_id
     storage.get_or_create_user(st.session_state.user_id, region=env_or_secret("TMDB_REGION", "KR") or "KR")
 
 
@@ -354,10 +360,21 @@ def full_reset(storage: Storage) -> None:
 
 
 def pick_single(label: str, options: List[str], default: str, key: str) -> str:
+    if not options:
+        return default
+    safe_default = default if default in options else options[0]
+    if key in st.session_state and st.session_state[key] not in options:
+        st.session_state[key] = safe_default
+
     if hasattr(st, "segmented_control"):
-        value = st.segmented_control(label, options, default=default, selection_mode="single", key=key)
-        return value or default
-    return st.radio(label, options, index=options.index(default) if default in options else 0, horizontal=True, key=key)
+        if key in st.session_state:
+            value = st.segmented_control(label, options, selection_mode="single", key=key)
+        else:
+            value = st.segmented_control(label, options, default=safe_default, selection_mode="single", key=key)
+        return value or safe_default
+    if key in st.session_state:
+        return st.radio(label, options, horizontal=True, key=key)
+    return st.radio(label, options, index=options.index(safe_default), horizontal=True, key=key)
 
 
 def pick_single_mapped(label: str, options: List[Tuple[str, str]], default_value: str, key: str) -> str:
@@ -667,21 +684,25 @@ def main() -> None:
     if st.session_state.profile_loaded_for_user != st.session_state.user_id:
         load_user_profile_into_state(storage, st.session_state.user_id)
         st.session_state.profile_loaded_for_user = st.session_state.user_id
+    if st.session_state.get("user_id_input") != st.session_state.user_id:
+        st.session_state.user_id_input = st.session_state.user_id
 
     st.sidebar.markdown(f"### {t('settings')}")
-    typed_user = st.sidebar.text_input(
+    st.sidebar.text_input(
         t("user_id"),
-        value=st.session_state.get("user_id", "guest"),
+        key="user_id_input",
         help=t("user_id_help"),
     )
-    chosen_user = normalize_user_id(typed_user)
-    if chosen_user != st.session_state.user_id:
-        st.session_state.user_id = chosen_user
-        st.session_state.qp_session_id = str(uuid.uuid4())
-        storage.get_or_create_user(chosen_user, region=st.session_state.get("qp_region", "KR"))
-        load_user_profile_into_state(storage, chosen_user)
-        st.session_state.profile_loaded_for_user = chosen_user
-        st.rerun()
+    if st.sidebar.button(t("switch_user"), type="secondary", use_container_width=True):
+        chosen_user = normalize_user_id(st.session_state.get("user_id_input", ""))
+        st.session_state.user_id_input = chosen_user
+        if chosen_user != st.session_state.user_id:
+            st.session_state.user_id = chosen_user
+            st.session_state.qp_session_id = str(uuid.uuid4())
+            storage.get_or_create_user(chosen_user, region=st.session_state.get("qp_region", "KR"))
+            load_user_profile_into_state(storage, chosen_user)
+            st.session_state.profile_loaded_for_user = chosen_user
+            st.rerun()
     st.sidebar.caption(f"{t('active_user')}: `{st.session_state.user_id}`")
 
     language_labels = {"en": t("language_english"), "ko": t("language_korean")}
