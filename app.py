@@ -78,7 +78,7 @@ from services.tmdb import TMDBClient, TMDBError
 
 
 load_dotenv()
-st.set_page_config(page_title="VibeRecs", layout="wide")
+st.set_page_config(page_title="지금한편", layout="wide")
 
 
 TRANSLATIONS = {
@@ -700,7 +700,7 @@ def render_refine(tmdb: TMDBClient, openai_service: OpenAIService, storage: Stor
 
 
 def main() -> None:
-    st.title("VibeRecs")
+    st.title("지금한편")
     storage = Storage()
     init_state(storage)
 
